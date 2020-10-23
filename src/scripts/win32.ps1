@@ -185,9 +185,9 @@ Function Add-Tool() {
     } catch { }
   }
   if($tool -eq "phive") {
-    Add-Extension curl >$null 2>&1
-    Add-Extension mbstring >$null 2>&1
-    Add-Extension xml >$null 2>&1
+    Add-Extension curl 
+    Add-Extension mbstring 
+    Add-Extension xml 
   } elseif($tool -eq "cs2pr") {
     (Get-Content $php_dir/cs2pr).replace('exit(9)', 'exit(0)') | Set-Content $php_dir/cs2pr
   } elseif($tool -eq "composer") {
@@ -247,12 +247,12 @@ if($env:PHPTS -ne 'ts') {
   $env:PHPTS = 'nts'
 }
 if(-not(Test-Path -LiteralPath $current_profile)) {
-  New-Item -Path $current_profile -ItemType "file" -Force >$null 2>&1
+  New-Item -Path $current_profile -ItemType "file" -Force 
 }
 
-Add-Printf >$null 2>&1
+Add-Printf 
 Step-Log "Setup PhpManager"
-Install-PhpManager >$null 2>&1
+Install-PhpManager 
 Add-Log $tick "PhpManager" "Installed"
 
 Step-Log "Setup PHP"
