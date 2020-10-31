@@ -124,9 +124,9 @@ add_oci() {
   oracle_client=$oracle_home/instantclient
   os=$(uname -s)
   nightly_versions='8.[0-1]'
-  add_client >/dev/null 2>&1
-  add_dependencies >/dev/null 2>&1
-  add_oci_helper >/dev/null 2>&1
+  add_client 
+  add_dependencies 
+  add_oci_helper 
   add_extension_log "$ext" "$status"
   check_extension "$ext" && add_license_log
 }

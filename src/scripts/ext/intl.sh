@@ -15,7 +15,7 @@ add_intl() {
   if [ "$icu" != "$supported_version" ]; then
     add_log "${cross:?}" "intl" "ICU $icu is not supported"
   else
-    install_icu "$icu" >/dev/null 2>&1
+    install_icu "$icu" 
     sudo curl "${curl_opts[@]:?}" -o "${ext_dir:?}/intl.so" "https://dl.bintray.com/shivammathur/icu4c/php${version:?}-intl-$icu.so"
     enable_extension intl extension
     add_extension_log intl "Installed and enabled with ICU $icu"

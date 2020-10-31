@@ -39,7 +39,7 @@ read_env() {
 self_hosted_setup() {
   if [[ $(command -v brew) == "" ]]; then
     step_log "Setup Brew"
-    curl "${curl_opts[@]}" https://raw.githubusercontent.com/Homebrew/install/master/install.sh | bash -s >/dev/null 2>&1
+    curl "${curl_opts[@]}" https://raw.githubusercontent.com/Homebrew/install/master/install.sh | bash -s 
     add_log "$tick" "Brew" "Installed Homebrew"
   fi
 }
@@ -49,8 +49,8 @@ remove_extension() {
   extension=$1
   if check_extension "$extension"; then
     sudo sed -i '' "/$extension/d" "$ini_file"
-    sudo rm -rf "$scan_dir"/*"$extension"* >/dev/null 2>&1
-    sudo rm -rf "$ext_dir"/"$extension".so >/dev/null 2>&1
+    sudo rm -rf "$scan_dir"/*"$extension"* 
+    sudo rm -rf "$ext_dir"/"$extension".so 
     (! check_extension "$extension" && add_log "$tick" ":$extension" "Removed") ||
       add_log "$cross" ":$extension" "Could not remove $extension on PHP $semver"
   else
@@ -84,7 +84,7 @@ get_pecl_version() {
 # Function to install PECL extensions and accept default options
 pecl_install() {
   local extension=$1
-  yes '' | sudo pecl install -f "$extension" >/dev/null 2>&1
+  yes '' | sudo pecl install -f "$extension" 
 }
 
 # Function to install a specific version of PECL extension.
@@ -102,7 +102,7 @@ add_pecl_extension() {
   if [ "$ext_version" = "$pecl_version" ]; then
     add_log "$tick" "$extension" "Enabled"
   else
-    remove_extension "$extension" >/dev/null 2>&1
+    remove_extension "$extension" 
     pecl_install "$extension-$pecl_version"
     add_extension_log "$extension-$pecl_version" "Installed and enabled"
   fi
@@ -128,7 +128,7 @@ add_extension() {
   elif check_extension "$extension"; then
     add_log "$tick" "$extension" "Enabled"
   elif ! check_extension "$extension"; then
-    eval "$install_command" >/dev/null 2>&1 &&
+    eval "$install_command"  &&
       if [[ "$version" =~ $old_versions ]]; then echo "$prefix=$ext_dir/$extension.so" >>"$ini_file"; fi
     add_extension_log "$extension" "Installed and enabled"
   fi
@@ -198,15 +198,15 @@ add_tool() {
     if [ "$tool" = "composer" ]; then
       configure_composer "$tool_path"
     elif [ "$tool" = "phan" ]; then
-      add_extension fileinfo "pecl_install fileinfo" extension >/dev/null 2>&1
-      add_extension ast "pecl_install ast" extension >/dev/null 2>&1
+      add_extension fileinfo "pecl_install fileinfo" extension 
+      add_extension ast "pecl_install ast" extension 
     elif [ "$tool" = "phive" ]; then
-      add_extension curl "pecl_install curl" extension >/dev/null 2>&1
-      add_extension mbstring "pecl_install mbstring" extension >/dev/null 2>&1
-      add_extension xml "pecl_install xml" extension >/dev/null 2>&1
+      add_extension curl "pecl_install curl" extension 
+      add_extension mbstring "pecl_install mbstring" extension 
+      add_extension xml "pecl_install xml" extension 
     elif [ "$tool" = "cs2pr" ]; then
       sudo sed -i '' 's/exit(9)/exit(0)/' "$tool_path"
-      tr -d '\r' <"$tool_path" | sudo tee "$tool_path.tmp" >/dev/null 2>&1 && sudo mv "$tool_path.tmp" "$tool_path"
+      tr -d '\r' <"$tool_path" | sudo tee "$tool_path.tmp"  && sudo mv "$tool_path.tmp" "$tool_path"
       sudo chmod a+x "$tool_path"
     elif [ "$tool" = "wp-cli" ]; then
       sudo cp -p "$tool_path" "$tool_path_dir"/wp
@@ -224,7 +224,7 @@ add_composertool() {
   release=$2
   prefix=$3
   (
-    composer global require "$prefix$release" >/dev/null 2>&1 &&
+    composer global require "$prefix$release"  &&
     json=$(grep "$prefix$tool" /Users/"$USER"/.composer/composer.json) &&
     tool_version=$(get_tool_version 'echo' "$json") &&
     add_log "$tick" "$tool" "Added $tool $tool_version"
@@ -299,20 +299,20 @@ if [ "$runner" = "self-hosted" ]; then
     add_log "$cross" "PHP" "PHP $version is not supported on self-hosted runner"
     exit 1
   else
-    self_hosted_setup >/dev/null 2>&1
+    self_hosted_setup 
   fi
 fi
 
 # Setup PHP
 step_log "Setup PHP"
 if [[ "$version" =~ $old_versions ]]; then
-  curl "${curl_opts[@]}" https://github.com/shivammathur/php5-darwin/releases/latest/download/install.sh | bash -s "$nodot_version" >/dev/null 2>&1
+  curl "${curl_opts[@]}" https://github.com/shivammathur/php5-darwin/releases/latest/download/install.sh | bash -s "$nodot_version" 
   status="Installed"
 elif [ "$existing_version" != "$version" ]; then
-  setup_php "install" >/dev/null 2>&1
+  setup_php "install" 
   status="Installed"
 elif [ "$existing_version" = "$version" ] && [ "$update" = "true" ]; then
-  setup_php "upgrade" >/dev/null 2>&1
+  setup_php "upgrade" 
   status="Updated to"
 else
   status="Found"
@@ -324,6 +324,6 @@ ext_dir=$(php -i | grep -Ei "extension_dir => /" | sed -e "s|.*=> s*||")
 scan_dir=$(php --ini | grep additional | sed -e "s|.*: s*||")
 sudo mkdir -m 777 -p "$ext_dir" "/Users/$USER/.composer"
 semver=$(php -v | head -n 1 | cut -f 2 -d ' ')
-if [[ ! "$version" =~ $old_versions ]]; then configure_pecl >/dev/null 2>&1; fi
+if [[ ! "$version" =~ $old_versions ]]; then configure_pecl ; fi
 sudo cp "$dist"/../src/configs/*.json "$RUNNER_TOOL_CACHE/"
 add_log "$tick" "PHP" "$status PHP $semver"

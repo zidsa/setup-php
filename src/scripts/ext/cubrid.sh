@@ -44,7 +44,7 @@ add_cubrid_helper() {
 add_cubrid() {
   ext=$1
   status='Enabled'
-  add_cubrid_helper >/dev/null 2>&1
+  add_cubrid_helper 
   add_extension_log "$ext" "$status"
   check_extension "$ext" && add_license_log
 }
