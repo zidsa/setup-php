@@ -1,678 +1,515 @@
 import * as tools from '../src/tools';
 
+interface IData {
+  tool: string;
+  version?: string;
+  domain?: string;
+  extension?: string;
+  os?: string;
+  php_version?: string;
+  release?: string;
+  repository?: string;
+  scope?: string;
+  type?: string;
+  fetch_latest?: string;
+  version_parameter?: string;
+  version_prefix?: string;
+}
+
+function getData(data: IData): Record<string, string> {
+  return {
+    tool: data.tool,
+    version: data.version || '',
+    domain: data.domain || 'https://example.com',
+    extension: data.extension || '.phar',
+    os: data.os || 'linux',
+    php_version: data.php_version || '7.4',
+    release: data.release || [data.tool, data.version].join(':'),
+    repository: data.repository || '',
+    scope: data.scope || 'global',
+    type: data.type || 'phar',
+    fetch_latest: data.fetch_latest || 'false',
+    version_parameter: data.version_parameter || '-V',
+    version_prefix: data.version_prefix || '',
+    github: 'https://github.com',
+    prefix: 'releases',
+    verb: 'download'
+  };
+}
+
+/**
+ * Mock fetch.ts
+ */
+jest.mock('../src/fetch', () => ({
+  fetch: jest
+    .fn()
+    .mockImplementation(
+      async (url: string, token?: string): Promise<Record<string, string>> => {
+        if (url.includes('atom') && !url.includes('no-')) {
+          return {
+            data: '"releases/tag/1.2.3", "releases/tag/3.2.1", "releases/tag/2.3.1"'
+          };
+        } else if (url.includes('no-data')) {
+          return {};
+        } else if (url.includes('no-release')) {
+          return {data: 'no-release'};
+        } else if (!token || token === 'valid_token') {
+          return {data: `[{"ref": "refs/tags/1.2.3", "url": "${url}"}]`};
+        } else if (token === 'beta_token') {
+          return {data: `[{"ref": "refs/tags/1.2.3-beta1", "url": "${url}"}]`};
+        } else if (token === 'no_data') {
+          return {data: '[]'};
+        } else {
+          return {error: 'Invalid token'};
+        }
+      }
+    )
+}));
+
 describe('Tools tests', () => {
-  it('checking parseToolVersion', async () => {
-    expect(await tools.getToolVersion('latest')).toBe('latest');
-    expect(await tools.getToolVersion('1.2.3')).toBe('1.2.3');
-    expect(await tools.getToolVersion('^1.2.3')).toBe('1.2.3');
-    expect(await tools.getToolVersion('>=1.2.3')).toBe('1.2.3');
-    expect(await tools.getToolVersion('>1.2.3')).toBe('1.2.3');
-    expect(await tools.getToolVersion('1.2.3-ALPHA')).toBe('1.2.3-ALPHA');
-    expect(await tools.getToolVersion('1.2.3-alpha')).toBe('1.2.3-alpha');
-    expect(await tools.getToolVersion('1.2.3-beta')).toBe('1.2.3-beta');
-    expect(await tools.getToolVersion('1.2.3-rc')).toBe('1.2.3-rc');
-    expect(await tools.getToolVersion('1.2.3-dev')).toBe('1.2.3-dev');
-    expect(await tools.getToolVersion('1.2.3-alpha1')).toBe('1.2.3-alpha1');
-    expect(await tools.getToolVersion('1.2.3-alpha.1')).toBe('1.2.3-alpha.1');
-  });
-
-  it('checking parseToolVersion', async () => {
-    expect(await tools.parseTool('phpunit')).toStrictEqual({
-      name: 'phpunit',
-      version: 'latest'
-    });
-    expect(await tools.parseTool('phpunit:1.2.3')).toStrictEqual({
-      name: 'phpunit',
-      version: '1.2.3'
-    });
-    expect(await tools.parseTool('phpunit:^1.2.3')).toStrictEqual({
-      name: 'phpunit',
-      version: '1.2.3'
-    });
-    expect(await tools.parseTool('phpunit:>=1.2.3')).toStrictEqual({
-      name: 'phpunit',
-      version: '1.2.3'
-    });
-    expect(await tools.parseTool('phpunit:>1.2.3')).toStrictEqual({
-      name: 'phpunit',
-      version: '1.2.3'
-    });
-    expect(await tools.parseTool('phpunit:1.2.3-ALPHA')).toStrictEqual({
-      name: 'phpunit',
-      version: '1.2.3-ALPHA'
-    });
-    expect(await tools.parseTool('phpunit:1.2.3-alpha')).toStrictEqual({
-      name: 'phpunit',
-      version: '1.2.3-alpha'
-    });
-    expect(await tools.parseTool('phpunit:1.2.3-beta')).toStrictEqual({
-      name: 'phpunit',
-      version: '1.2.3-beta'
-    });
-    expect(await tools.parseTool('phpunit:1.2.3-rc')).toStrictEqual({
-      name: 'phpunit',
-      version: '1.2.3-rc'
-    });
-    expect(await tools.parseTool('phpunit:1.2.3-dev')).toStrictEqual({
-      name: 'phpunit',
-      version: '1.2.3-dev'
-    });
-    expect(await tools.parseTool('phpunit:1.2.3-alpha1')).toStrictEqual({
-      name: 'phpunit',
-      version: '1.2.3-alpha1'
-    });
-    expect(await tools.parseTool('phpunit:1.2.3-alpha.1')).toStrictEqual({
-      name: 'phpunit',
-      version: '1.2.3-alpha.1'
-    });
-  });
-
-  it('checking getUri', async () => {
+  it.each`
+    token              | version
+    ${'invalid_token'} | ${'1.2'}
+    ${'valid_token'}   | ${'1.2.3'}
+    ${'beta_token'}    | ${'1.2.3-beta1'}
+    ${''}              | ${'1.2.3'}
+  `('checking getSemverVersion: $token', async ({token, version}) => {
+    process.env['COMPOSER_TOKEN'] = token;
     expect(
-      await tools.getUri('tool', '.phar', 'latest', 'releases', '', 'download')
-    ).toBe('releases/latest/download/tool.phar');
+      await tools.getSemverVersion(getData({tool: 'tool', version: '1.2'}))
+    ).toBe(version);
+  });
+
+  it.each`
+    tool                 | fetch_latest | version
+    ${'tool'}            | ${'true'}    | ${'3.2.1'}
+    ${'tool-no-data'}    | ${'true'}    | ${'latest'}
+    ${'tool-no-release'} | ${'true'}    | ${'latest'}
+    ${'tool'}            | ${'false'}   | ${'latest'}
+  `(
+    'checking getLatestVersion: $tool, $fetch_latest, $version',
+    async ({tool, fetch_latest, version}) => {
+      expect(
+        await tools.getLatestVersion(
+          getData({
+            tool: tool,
+            repository: 'user/' + tool,
+            fetch_latest: fetch_latest
+          })
+        )
+      ).toBe(version);
+    }
+  );
+
+  it.each`
+    version            | tool          | type          | expected
+    ${'latest'}        | ${'tool'}     | ${'phar'}     | ${'latest'}
+    ${'1'}             | ${'composer'} | ${'phar'}     | ${'1'}
+    ${'1.2'}           | ${'tool'}     | ${'composer'} | ${'1.2.*'}
+    ${'^1.2.3'}        | ${'tool'}     | ${'phar'}     | ${'1.2.3'}
+    ${'>=1.2.3'}       | ${'tool'}     | ${'phar'}     | ${'1.2.3'}
+    ${'>1.2.3'}        | ${'tool'}     | ${'phar'}     | ${'1.2.3'}
+    ${'1.2.3-ALPHA'}   | ${'tool'}     | ${'phar'}     | ${'1.2.3-ALPHA'}
+    ${'1.2.3-alpha'}   | ${'tool'}     | ${'phar'}     | ${'1.2.3-alpha'}
+    ${'1.2.3-beta'}    | ${'tool'}     | ${'phar'}     | ${'1.2.3-beta'}
+    ${'1.2.3-rc'}      | ${'tool'}     | ${'phar'}     | ${'1.2.3-rc'}
+    ${'1.2.3-dev'}     | ${'tool'}     | ${'phar'}     | ${'1.2.3-dev'}
+    ${'1.2.3-alpha1'}  | ${'tool'}     | ${'phar'}     | ${'1.2.3-alpha1'}
+    ${'1.2.3-alpha.1'} | ${'tool'}     | ${'phar'}     | ${'1.2.3-alpha.1'}
+  `(
+    'checking getVersion: $version, $tool, $type',
+    async ({version, tool, type, expected}) => {
+      expect(
+        await tools.getVersion(
+          version,
+          getData({tool: tool, version: version, type: type})
+        )
+      ).toBe(expected);
+    }
+  );
+
+  it.each`
+    input                   | expected
+    ${'tool'}               | ${'tool'}
+    ${'alias:1.2.3'}        | ${'tool:1.2.3'}
+    ${'tool:1.2.3'}         | ${'tool:1.2.3'}
+    ${'tool:^1.2.3'}        | ${'tool:^1.2.3'}
+    ${'tool:>=1.2.3'}       | ${'tool:>=1.2.3'}
+    ${'tool:>1.2.3'}        | ${'tool:>1.2.3'}
+    ${'tool:1.2.3-ALPHA'}   | ${'tool:1.2.3-ALPHA'}
+    ${'tool:1.2.3-beta'}    | ${'tool:1.2.3-beta'}
+    ${'tool:1.2.3-rc'}      | ${'tool:1.2.3-rc'}
+    ${'tool:1.2.3-dev'}     | ${'tool:1.2.3-dev'}
+    ${'tool:1.2.3-alpha1'}  | ${'tool:1.2.3-alpha1'}
+    ${'tool:1.2.3-alpha.1'} | ${'tool:1.2.3-alpha.1'}
+    ${'user/tool:^1.2.3'}   | ${'tool:^1.2.3'}
+  `('checking getRelease: $input', async ({input, expected}) => {
     expect(
-      await tools.getUri('tool', '.phar', '1.2.3', 'releases', '', 'download')
-    ).toBe('releases/download/1.2.3/tool.phar');
-    expect(
-      await tools.getUri('tool', '.phar', '1.2.3', 'releases', 'v', 'download')
-    ).toBe('releases/download/v1.2.3/tool.phar');
+      await tools.getRelease(input, getData({tool: 'tool', version: 'latest'}))
+    ).toBe(expected);
   });
 
-  it('checking getCodeceptionUriBuilder', async () => {
-    expect(await tools.getCodeceptionUriBuilder('3.2.1', 'php56')).toBe(
-      'releases/3.2.1/php56/codecept.phar'
-    );
-    expect(await tools.getCodeceptionUriBuilder('3.2.1', 'php54')).toBe(
-      'releases/3.2.1/php54/codecept.phar'
-    );
-    expect(await tools.getCodeceptionUriBuilder('3.2.1', '')).toBe(
-      'releases/3.2.1/codecept.phar'
-    );
-  });
-
-  it('checking getCodeceptionUri', async () => {
-    expect(await tools.getCodeceptionUri('latest', '5.6')).toBe(
-      'php56/codecept.phar'
-    );
-    expect(await tools.getCodeceptionUri('latest', '7.0')).toBe(
-      'php56/codecept.phar'
-    );
-    expect(await tools.getCodeceptionUri('latest', '7.1')).toBe(
-      'php56/codecept.phar'
-    );
-    expect(await tools.getCodeceptionUri('latest', '7.2')).toBe(
-      'codecept.phar'
-    );
-    expect(await tools.getCodeceptionUri('latest', '7.3')).toBe(
-      'codecept.phar'
-    );
-    expect(await tools.getCodeceptionUri('latest', '7.4')).toBe(
-      'codecept.phar'
-    );
-    expect(await tools.getCodeceptionUri('4.0.0', '7.4')).toBe(
-      'releases/4.0.0/codecept.phar'
-    );
-    expect(await tools.getCodeceptionUri('4.0.0', '5.6')).toBe(
-      'releases/4.0.0/php56/codecept.phar'
-    );
-    expect(await tools.getCodeceptionUri('4.0.0', '7.1')).toBe(
-      'releases/4.0.0/php56/codecept.phar'
-    );
-    expect(await tools.getCodeceptionUri('3.1.0', '7.4')).toBe(
-      'releases/3.1.0/codecept.phar'
-    );
-    expect(await tools.getCodeceptionUri('3.1.0', '5.6')).toBe(
-      'releases/3.1.0/php54/codecept.phar'
-    );
-    expect(await tools.getCodeceptionUri('2.5.4', '7.4')).toBe(
-      'releases/2.5.4/codecept.phar'
-    );
-    expect(await tools.getCodeceptionUri('2.5.4', '5.6')).toBe(
-      'releases/2.5.4/php54/codecept.phar'
-    );
-    expect(await tools.getCodeceptionUri('2.3.4', '7.4')).toBe(
-      'releases/2.3.4/codecept.phar'
-    );
-    expect(await tools.getCodeceptionUri('2.3.4', '5.4')).toBe(
-      'releases/2.3.4/php54/codecept.phar'
-    );
-    expect(await tools.getCodeceptionUri('2.2.4', '5.6')).toBe(
-      'releases/2.2.4/codecept.phar'
-    );
-    expect(await tools.getCodeceptionUri('2.2.4', '7.4')).toBe(
-      'releases/2.2.4/codecept.phar'
-    );
-    expect(await tools.getCodeceptionUri('2.2.4', '5.4')).toBe(
-      'releases/2.2.4/php54/codecept.phar'
-    );
-    expect(await tools.getCodeceptionUri('2.1.7', '5.6')).toBe(
-      'releases/2.1.7/codecept.phar'
-    );
-    expect(await tools.getCodeceptionUri('2.1.7', '5.4')).toBe(
-      'releases/2.1.7/php54/codecept.phar'
-    );
-    expect(await tools.getCodeceptionUri('2.1.5', '5.4')).toBe(
-      'releases/2.1.5/codecept.phar'
-    );
-    expect(await tools.getCodeceptionUri('2.1.5', '7.4')).toBe(
-      'releases/2.1.5/codecept.phar'
-    );
-    expect(await tools.getCodeceptionUri('1.6.9', '7.4')).toBe(
-      'releases/1.6.9/codecept.phar'
-    );
-    expect(await tools.getCodeceptionUri('1.5.0', '7.4')).toBe(
-      'releases/1.5.0/codecept.phar'
+  it.each`
+    input_list                   | filtered_list
+    ${'a, b'}                    | ${'composer, a, b'}
+    ${'a, b, composer'}          | ${'composer, a, b'}
+    ${'a, b, composer:1.2.3'}    | ${'composer:1.2.3, a, b'}
+    ${'a, b, composer:v1.2.3'}   | ${'composer:1.2.3, a, b'}
+    ${'a, b, composer:snapshot'} | ${'composer:snapshot, a, b'}
+    ${'a, b, composer:preview'}  | ${'composer:preview, a, b'}
+    ${'a, b, composer:1'}        | ${'composer:1, a, b'}
+    ${'a, b, composer:2'}        | ${'composer:2, a, b'}
+    ${'a, b, composer:v1'}       | ${'composer:1, a, b'}
+    ${'a, b, composer:v2'}       | ${'composer:2, a, b'}
+  `('checking filterList $input_list', async ({input_list, filtered_list}) => {
+    expect(await tools.filterList(input_list.split(', '))).toStrictEqual(
+      filtered_list.split(', ')
     );
   });
 
-  it('checking addPhive', async () => {
-    let script: string = await tools.addPhive('1.2.3', 'linux');
-    expect(script).toContain(
-      'add_tool https://github.com/phar-io/phive/releases/download/1.2.3/phive-1.2.3.phar phive'
-    );
+  it.each`
+    version     | version_prefix | url_suffix
+    ${'latest'} | ${'v'}         | ${'latest/download/tool.phar'}
+    ${'1.2.3'}  | ${'v'}         | ${'download/v1.2.3/tool.phar'}
+    ${'1.2.3'}  | ${''}          | ${'download/1.2.3/tool.phar'}
+  `(
+    'checking getUrl: $version_prefix$version',
+    async ({version, version_prefix, url_suffix}) => {
+      const data = getData({
+        tool: 'tool',
+        version: version,
+        version_prefix: version_prefix
+      });
+      expect(await tools.getUrl(data)).toContain(url_suffix);
+    }
+  );
 
-    script = await tools.addPhive('latest', 'win32');
-    expect(script).toContain(
-      'Add-Tool https://phar.io/releases/phive.phar phive'
-    );
+  it.each`
+    version     | version_prefix | url
+    ${'latest'} | ${''}          | ${'https://example.com/tool.phar'}
+    ${'1.2.3'}  | ${'v'}         | ${'https://example.com/tool-v1.2.3.phar'}
+  `(
+    'checking getPharUrl: $version_prefix$version',
+    async ({version, version_prefix, url}) => {
+      const data = getData({
+        tool: 'tool',
+        version: version,
+        version_prefix: version_prefix
+      });
+      expect(await tools.getPharUrl(data)).toBe(url);
+    }
+  );
+
+  it.each`
+    os           | script
+    ${'linux'}   | ${'add_tool https://example.com/tool.phar tool "-v"'}
+    ${'darwin'}  | ${'add_tool https://example.com/tool.phar tool "-v"'}
+    ${'win32'}   | ${'Add-Tool https://example.com/tool.phar tool "-v"'}
+    ${'openbsd'} | ${'Platform openbsd is not supported'}
+  `('checking addArchive: $os', async ({os, script}) => {
+    const data = getData({
+      tool: 'tool',
+      version: 'latest',
+      version_parameter: JSON.stringify('-v'),
+      os: os
+    });
+    data['url'] = 'https://example.com/tool.phar';
+    expect(await tools.addArchive(data)).toContain(script);
   });
 
-  it('checking getPharUri', async () => {
-    expect(await tools.getPharUrl('domain', 'tool', '', 'latest')).toBe(
-      'domain/tool.phar'
-    );
-    expect(await tools.getPharUrl('domain', 'tool', 'v', '1.2.3')).toBe(
-      'domain/tool-v1.2.3.phar'
-    );
+  it.each`
+    os           | script                                             | scope
+    ${'linux'}   | ${'add_composertool tool tool:1.2.3 user/ global'} | ${'global'}
+    ${'darwin'}  | ${'add_composertool tool tool:1.2.3 user/ scoped'} | ${'scoped'}
+    ${'win32'}   | ${'Add-Composertool tool tool:1.2.3 user/ scoped'} | ${'scoped'}
+    ${'openbsd'} | ${'Platform openbsd is not supported'}             | ${'global'}
+  `('checking addPackage: $os, $scope', async ({os, script, scope}) => {
+    const data = getData({
+      tool: 'tool',
+      version: '1.2.3',
+      repository: 'user/tool',
+      os: os,
+      scope: scope
+    });
+    data['release'] = [data['tool'], data['version']].join(':');
+    expect(await tools.addPackage(data)).toContain(script);
   });
 
-  it('checking getBlackfirePlayerUrl', async () => {
-    expect(await tools.getBlackfirePlayerUrl('latest', '7.4')).toBe(
-      'https://get.blackfire.io/blackfire-player.phar'
-    );
-    expect(await tools.getBlackfirePlayerUrl('latest', '5.5')).toBe(
-      'https://get.blackfire.io/blackfire-player-v1.9.3.phar'
-    );
-    expect(await tools.getBlackfirePlayerUrl('latest', '7.0')).toBe(
-      'https://get.blackfire.io/blackfire-player-v1.9.3.phar'
-    );
-    expect(await tools.getBlackfirePlayerUrl('1.2.3', '7.0')).toBe(
-      'https://get.blackfire.io/blackfire-player-v1.2.3.phar'
-    );
+  it.each`
+    version     | php_version | os          | script
+    ${'latest'} | ${'7.4'}    | ${'linux'}  | ${'add_tool https://github.com/phar-io/phive/releases/download/3.2.1/phive-3.2.1.phar phive'}
+    ${'1.2.3'}  | ${'7.4'}    | ${'darwin'} | ${'add_tool https://github.com/phar-io/phive/releases/download/1.2.3/phive-1.2.3.phar phive'}
+    ${'1.2.3'}  | ${'7.2'}    | ${'win32'}  | ${'Add-Tool https://github.com/phar-io/phive/releases/download/0.14.5/phive-0.14.5.phar phive'}
+    ${'1.2.3'}  | ${'7.1'}    | ${'win32'}  | ${'Add-Tool https://github.com/phar-io/phive/releases/download/0.13.5/phive-0.13.5.phar phive'}
+    ${'latest'} | ${'5.6'}    | ${'win32'}  | ${'Add-Tool https://github.com/phar-io/phive/releases/download/0.12.1/phive-0.12.1.phar phive'}
+    ${'latest'} | ${'5.5'}    | ${'win32'}  | ${'Phive is not supported on PHP 5.5'}
+  `(
+    'checking addPhive: $version, $php_version, $os',
+    async ({version, php_version, os, script}) => {
+      const data = getData({
+        tool: 'phive',
+        repository: 'phar-io/phive',
+        version_parameter: 'status',
+        version: version,
+        php_version: php_version,
+        os: os
+      });
+      script = await tools.addPhive(data);
+      expect(script).toContain(script);
+    }
+  );
+
+  it.each`
+    version     | php_version | url
+    ${'latest'} | ${'7.4'}    | ${'https://get.blackfire.io/blackfire-player.phar'}
+    ${'1.2.3'}  | ${'7.4'}    | ${'https://get.blackfire.io/blackfire-player-v1.2.3.phar'}
+    ${'latest'} | ${'5.5'}    | ${'https://get.blackfire.io/blackfire-player-v1.9.3.phar'}
+    ${'latest'} | ${'7.0'}    | ${'https://get.blackfire.io/blackfire-player-v1.9.3.phar'}
+  `(
+    'checking addBlackfirePlayer: $version, $php_version',
+    async ({version, php_version, url}) => {
+      const data = getData({
+        tool: 'blackfire-player',
+        domain: 'https://get.blackfire.io',
+        version_prefix: 'v',
+        version: version,
+        php_version: php_version
+      });
+      expect(await tools.addBlackfirePlayer(data)).toContain(url);
+    }
+  );
+
+  it.each`
+    version     | url
+    ${'latest'} | ${'https://deployer.org/deployer.phar'}
+    ${'1.2.3'}  | ${'https://deployer.org/releases/v1.2.3/deployer.phar'}
+  `('checking addDeployer: $version', async ({version, url}) => {
+    const data = getData({
+      tool: 'deployer',
+      domain: 'https://deployer.org',
+      version: version
+    });
+    expect(await tools.addDeployer(data)).toContain(url);
   });
 
-  it('checking getDeployerUri', async () => {
-    expect(await tools.getDeployerUrl('latest')).toBe(
-      'https://deployer.org/deployer.phar'
-    );
-    expect(await tools.getDeployerUrl('1.2.3')).toBe(
-      'https://deployer.org/releases/v1.2.3/deployer.phar'
-    );
+  it.each`
+    version        | no_tool_cache | cache_url                                                                                               | source_url
+    ${'latest'}    | ${'true'}     | ${'https://github.com/shivammathur/composer-cache/releases/latest/download/composer-7.4-stable.phar'}   | ${'https://getcomposer.org/composer-stable.phar'}
+    ${'stable'}    | ${'true'}     | ${'https://github.com/shivammathur/composer-cache/releases/latest/download/composer-7.4-stable.phar'}   | ${'https://getcomposer.org/composer-stable.phar'}
+    ${'snapshot'}  | ${'true'}     | ${'https://github.com/shivammathur/composer-cache/releases/latest/download/composer-7.4-snapshot.phar'} | ${'https://getcomposer.org/composer.phar'}
+    ${'preview'}   | ${'true'}     | ${'https://github.com/shivammathur/composer-cache/releases/latest/download/composer-7.4-preview.phar'}  | ${'https://getcomposer.org/composer-preview.phar'}
+    ${'1'}         | ${'false'}    | ${'https://github.com/shivammathur/composer-cache/releases/latest/download/composer-7.4-1.phar'}        | ${'https://getcomposer.org/composer-1.phar'}
+    ${'2'}         | ${'false'}    | ${'https://github.com/shivammathur/composer-cache/releases/latest/download/composer-7.4-2.phar'}        | ${'https://getcomposer.org/composer-2.phar'}
+    ${'1.2.3'}     | ${'false'}    | ${'https://github.com/composer/composer/releases/download/1.2.3/composer.phar'}                         | ${'https://getcomposer.org/composer-1.2.3.phar'}
+    ${'1.2.3-RC1'} | ${'false'}    | ${'https://github.com/composer/composer/releases/download/1.2.3-RC1/composer.phar'}                     | ${'https://getcomposer.org/composer-1.2.3-RC1.phar'}
+  `(
+    'checking addComposer: $version, $no_tool_cache',
+    async ({version, no_tool_cache, cache_url, source_url}) => {
+      const data = getData({
+        tool: 'composer',
+        domain: 'https://getcomposer.org',
+        repository: 'composer/composer',
+        version: version
+      });
+      process.env['no_tools_cache'] = no_tool_cache;
+      if (no_tool_cache !== 'true') {
+        expect(await tools.addComposer(data)).toContain(
+          `${cache_url},${source_url}`
+        );
+      } else {
+        expect(await tools.addComposer(data)).toContain(source_url);
+      }
+    }
+  );
+
+  it.each`
+    version     | uri
+    ${'latest'} | ${'wp-cli/builds/blob/gh-pages/phar/wp-cli.phar?raw=true'}
+    ${'1.2.3'}  | ${'wp-cli/wp-cli/releases/download/v1.2.3/wp-cli-1.2.3.phar'}
+  `('checking addWPCLI: $version', async ({version, uri}) => {
+    const data = getData({
+      tool: 'wp-cli',
+      repository: 'wp-cli/wp-cli',
+      php_version: '7.4',
+      version_prefix: 'v',
+      version: version
+    });
+    expect(await tools.addWPCLI(data)).toContain(uri);
   });
 
-  it('checking addComposer', async () => {
-    expect(await tools.addComposer(['a', 'b'])).toStrictEqual([
-      'composer',
-      'a',
-      'b'
-    ]);
-    expect(await tools.addComposer(['a', 'b', 'composer'])).toStrictEqual([
-      'composer',
-      'a',
-      'b'
-    ]);
-    expect(await tools.addComposer(['a', 'b', 'composer:1.2'])).toStrictEqual([
-      'composer',
-      'a',
-      'b'
-    ]);
-    expect(
-      await tools.addComposer(['a', 'b', 'composer:1.2.3'])
-    ).toStrictEqual(['composer:1.2.3', 'a', 'b']);
-    expect(
-      await tools.addComposer(['a', 'b', 'composer:v1.2.3'])
-    ).toStrictEqual(['composer:1.2.3', 'a', 'b']);
-    expect(
-      await tools.addComposer(['a', 'b', 'composer:snapshot'])
-    ).toStrictEqual(['composer:snapshot', 'a', 'b']);
-    expect(
-      await tools.addComposer(['a', 'b', 'composer:preview'])
-    ).toStrictEqual(['composer:preview', 'a', 'b']);
-    expect(
-      await tools.addComposer(['a', 'b', 'c', 'composer:1'])
-    ).toStrictEqual(['composer:1', 'a', 'b', 'c']);
-    expect(
-      await tools.addComposer(['a', 'b', 'c', 'composer:2'])
-    ).toStrictEqual(['composer:2', 'a', 'b', 'c']);
-    expect(
-      await tools.addComposer(['a', 'b', 'c', 'composer:v1'])
-    ).toStrictEqual(['composer:1', 'a', 'b', 'c']);
-    expect(
-      await tools.addComposer(['a', 'b', 'c', 'composer:v2'])
-    ).toStrictEqual(['composer:2', 'a', 'b', 'c']);
-    expect(
-      await tools.addComposer(['hirak', 'b', 'c', 'composer:v2'])
-    ).toStrictEqual(['composer:1', 'hirak', 'b', 'c']);
+  it.each`
+    tool            | os           | script
+    ${'phpize'}     | ${'linux'}   | ${'add_devtools phpize'}
+    ${'php-config'} | ${'linux'}   | ${'add_devtools php-config'}
+    ${'phpize'}     | ${'darwin'}  | ${'add_devtools phpize'}
+    ${'php-config'} | ${'darwin'}  | ${'add_devtools php-config'}
+    ${'phpize'}     | ${'win32'}   | ${'Add-Log "$tick" "phpize" "phpize is not a windows tool"'}
+    ${'php-config'} | ${'win32'}   | ${'Add-Log "$tick" "php-config" "php-config is not a windows tool"'}
+    ${'phpize'}     | ${'openbsd'} | ${'Platform openbsd is not supported'}
+  `('checking addDevTools: $tool, $os', async ({tool, os, script}) => {
+    const data = getData({
+      version: '7.4',
+      tool: tool,
+      os: os
+    });
+    expect(await tools.addDevTools(data)).toContain(script);
   });
 
-  it('checking getComposerUrl', async () => {
-    expect(await tools.getComposerUrl('latest')).toContain(
-      'https://getcomposer.org/composer-stable.phar'
-    );
-    expect(await tools.getComposerUrl('stable')).toContain(
-      'https://getcomposer.org/composer-stable.phar'
-    );
-    expect(await tools.getComposerUrl('snapshot')).toContain(
-      'https://getcomposer.org/composer.phar'
-    );
-    expect(await tools.getComposerUrl('preview')).toContain(
-      'https://getcomposer.org/composer-preview.phar'
-    );
-    expect(await tools.getComposerUrl('1')).toContain(
-      'https://getcomposer.org/composer-1.phar'
-    );
-    expect(await tools.getComposerUrl('2')).toContain(
-      'https://getcomposer.org/composer-2.phar'
-    );
-    expect(await tools.getComposerUrl('1.7.2')).toContain(
-      'https://github.com/composer/composer/releases/download/1.7.2/composer.phar'
-    );
-    expect(await tools.getComposerUrl('1.7.2')).toContain(
-      'https://getcomposer.org/composer-1.7.2.phar'
-    );
-    expect(await tools.getComposerUrl('2.0.0-RC2')).toContain(
-      'https://github.com/composer/composer/releases/download/2.0.0-RC2/composer.phar'
-    );
-    expect(await tools.getComposerUrl('2.0.0-RC2')).toContain(
-      'https://getcomposer.org/composer-2.0.0-RC2.phar'
-    );
-    expect(await tools.getComposerUrl('wrong')).toContain(
-      'https://getcomposer.org/composer-stable.phar'
-    );
+  it.each([
+    [
+      'blackfire, blackfire-player, churn, cs2pr, flex, grpc_php_plugin, parallel-lint, php-cs-fixer, phpDocumentor, phplint, phpstan, phpunit, pecl, phing, phinx, phinx:1.2.3, phive, phpunit-bridge, phpunit-polyfills, php-config, phpize, protoc, symfony, vapor, wp',
+      [
+        'add_tool https://github.com/shivammathur/composer-cache/releases/latest/download/composer-7.4-stable.phar,https://getcomposer.org/composer-stable.phar composer',
+        'add_blackfire',
+        'add_tool https://get.blackfire.io/blackfire-player.phar blackfire-player "-V"',
+        'add_tool https://github.com/bmitch/churn-php/releases/latest/download/churn.phar churn "-V"',
+        'add_tool https://github.com/staabm/annotate-pull-request-from-checkstyle/releases/latest/download/cs2pr cs2pr "-V"',
+        'add_composertool flex flex symfony/ global',
+        'add_grpc_php_plugin latest',
+        'add_tool https://github.com/php-parallel-lint/PHP-Parallel-Lint/releases/latest/download/parallel-lint.phar parallel-lint "--version"',
+        'add_tool https://github.com/FriendsOfPHP/PHP-CS-Fixer/releases/download/v3.2.1/php-cs-fixer.phar php-cs-fixer "-V"',
+        'add_tool https://github.com/phpDocumentor/phpDocumentor/releases/latest/download/phpDocumentor.phar phpDocumentor "--version"',
+        'add_composertool phplint phplint overtrue/',
+        'add_tool https://github.com/phpstan/phpstan/releases/latest/download/phpstan.phar phpstan "-V"',
+        'add_tool https://phar.phpunit.de/phpunit.phar phpunit "--version"',
+        'add_pecl',
+        'add_tool https://www.phing.info/get/phing-latest.phar phing "-v"',
+        'add_composertool phinx phinx robmorgan/ scoped',
+        'add_composertool phinx phinx:1.2.3 robmorgan/ scoped',
+        'add_tool https://github.com/phar-io/phive/releases/download/3.2.1/phive-3.2.1.phar phive "status"',
+        'add_composertool phpunit-bridge phpunit-bridge symfony/ global',
+        'add_composertool phpunit-polyfills phpunit-polyfills yoast/ global',
+        'add_devtools php-config',
+        'add_devtools phpize',
+        'add_protoc latest',
+        'add_symfony latest',
+        'add_composertool vapor-cli vapor-cli laravel/ scoped',
+        'add_tool https://github.com/wp-cli/builds/blob/gh-pages/phar/wp-cli.phar?raw=true wp-cli "--version"'
+      ]
+    ]
+  ])('checking addTools on linux', async (tools_csv, scripts) => {
+    const expected = await tools.addTools(tools_csv, '7.4', 'linux');
+    scripts.forEach(script => {
+      expect(expected).toContain(script);
+    });
   });
 
-  it('checking getSymfonyUri', async () => {
-    expect(await tools.getSymfonyUri('latest', 'linux')).toContain(
-      'releases/latest/download/symfony_linux_amd64'
-    );
-    expect(await tools.getSymfonyUri('1.2.3', 'linux')).toContain(
-      'releases/download/v1.2.3/symfony_linux_amd64'
-    );
-    expect(await tools.getSymfonyUri('latest', 'darwin')).toContain(
-      'releases/latest/download/symfony_darwin_amd64'
-    );
-    expect(await tools.getSymfonyUri('1.2.3', 'darwin')).toContain(
-      'releases/download/v1.2.3/symfony_darwin_amd64'
-    );
-    expect(await tools.getSymfonyUri('latest', 'win32')).toContain(
-      'releases/latest/download/symfony_windows_amd64'
-    );
-    expect(await tools.getSymfonyUri('1.2.3', 'win32')).toContain(
-      'releases/download/v1.2.3/symfony_windows_amd64'
-    );
-    expect(await tools.getSymfonyUri('1.2.3', 'openbsd')).toContain(
-      'Platform openbsd is not supported'
-    );
+  it.each([
+    [
+      'behat, blackfire, blackfire-player, churn, composer-normalize, composer-require-checker, composer-unused, cs2pr:1.2.3, flex, grpc_php_plugin:1.2.3, infection, phan, phan:1.2.3, phing:1.2.3, phinx, phive:1.2.3, php-config, phpcbf, phpcpd, phpcs, phpdoc, phpize, phpmd, phpspec, phpunit-bridge:5.6, phpunit-polyfills:1.0.1, protoc:v1.2.3, psalm, symfony-cli, vapor-cli, wp-cli',
+      [
+        'add_tool https://github.com/shivammathur/composer-cache/releases/latest/download/composer-7.4-stable.phar,https://getcomposer.org/composer-stable.phar composer',
+        'add_composertool behat behat behat/ scoped',
+        'add_blackfire',
+        'add_tool https://get.blackfire.io/blackfire-player.phar blackfire-player "-V"',
+        'add_tool https://github.com/bmitch/churn-php/releases/latest/download/churn.phar churn "-V"',
+        'add_tool https://github.com/ergebnis/composer-normalize/releases/latest/download/composer-normalize.phar composer-normalize "-V"',
+        'add_composertool composer-require-checker composer-require-checker maglnet/ scoped',
+        'add_composertool composer-unused composer-unused icanhazstring/ scoped',
+        'add_tool https://github.com/staabm/annotate-pull-request-from-checkstyle/releases/download/1.2.3/cs2pr cs2pr "-V"',
+        'add_composertool flex flex symfony/ global',
+        'add_grpc_php_plugin 1.2.3',
+        'add_tool https://github.com/infection/infection/releases/latest/download/infection.phar infection "-V"',
+        'add_tool https://github.com/phan/phan/releases/latest/download/phan.phar phan "-v"',
+        'add_tool https://github.com/phan/phan/releases/download/1.2.3/phan.phar phan "-v"',
+        'add_tool https://www.phing.info/get/phing-1.2.3.phar,https://github.com/phingofficial/phing/releases/download/1.2.3/phing-1.2.3.phar phing "-v"',
+        'add_composertool phinx phinx robmorgan/ scoped',
+        'add_tool https://github.com/phar-io/phive/releases/download/1.2.3/phive-1.2.3.phar phive',
+        'add_devtools php-config',
+        'add_tool https://github.com/squizlabs/PHP_CodeSniffer/releases/latest/download/phpcbf.phar phpcbf "--version"',
+        'add_tool https://phar.phpunit.de/phpcpd.phar phpcpd "--version"',
+        'add_tool https://github.com/squizlabs/PHP_CodeSniffer/releases/latest/download/phpcs.phar phpcs "--version"',
+        'add_tool https://github.com/phpDocumentor/phpDocumentor/releases/latest/download/phpDocumentor.phar phpDocumentor "--version"',
+        'add_devtools phpize',
+        'add_tool https://github.com/phpmd/phpmd/releases/latest/download/phpmd.phar phpmd "--version"',
+        'add_tool https://github.com/phpspec/phpspec/releases/latest/download/phpspec.phar phpspec "-V"',
+        'add_composertool phpunit-bridge phpunit-bridge:5.6.* symfony/ global',
+        'add_composertool phpunit-polyfills phpunit-polyfills:1.0.1 yoast/ global',
+        'add_protoc 1.2.3',
+        'add_tool https://github.com/vimeo/psalm/releases/latest/download/psalm.phar psalm "-v"',
+        'add_symfony latest',
+        'add_composertool vapor-cli vapor-cli laravel/ scoped',
+        'add_tool https://github.com/wp-cli/builds/blob/gh-pages/phar/wp-cli.phar?raw=true wp-cli "--version"'
+      ]
+    ]
+  ])('checking addTools on darwin', async (tools_csv, scripts) => {
+    const expected = await tools.addTools(tools_csv, '7.4', 'darwin');
+    scripts.forEach(script => {
+      expect(expected).toContain(script);
+    });
   });
 
-  it('checking getCleanedToolsList', async () => {
-    const tools_list: string[] = await tools.getCleanedToolsList(
-      'tool, composer:1.2, behat/behat, icanhazstring/composer-unused, laravel/vapor-cli, robmorgan/phinx, phpspec/phpspec, symfony/flex'
-    );
-    expect(tools_list).toStrictEqual([
-      'composer',
-      'tool',
-      'behat',
-      'composer-unused',
-      'vapor-cli',
-      'phinx',
-      'phpspec',
-      'flex'
-    ]);
+  it.each([
+    [
+      'blackfire, blackfire-player:1.2.3, cs2pr, churn, deployer, does_not_exist, flex, phinx, phive:0.13.2, php-config, phpize, phpmd, simple-phpunit, symfony, wp',
+      [
+        'Add-Tool https://github.com/shivammathur/composer-cache/releases/latest/download/composer-7.4-stable.phar,https://getcomposer.org/composer-stable.phar composer',
+        'Add-Blackfire',
+        'Add-Tool https://get.blackfire.io/blackfire-player-v1.2.3.phar blackfire-player "-V"',
+        'Add-Tool https://github.com/staabm/annotate-pull-request-from-checkstyle/releases/latest/download/cs2pr cs2pr "-V"',
+        'Add-Tool https://github.com/bmitch/churn-php/releases/latest/download/churn.phar churn "-V"',
+        'Add-Tool https://deployer.org/deployer.phar deployer "-V"',
+        'Tool does_not_exist is not supported',
+        'Add-Composertool flex flex symfony/ global',
+        'Add-Composertool phinx phinx robmorgan/ scoped',
+        'Add-Tool https://github.com/phar-io/phive/releases/download/0.13.2/phive-0.13.2.phar phive "status"',
+        'php-config is not a windows tool',
+        'phpize is not a windows tool',
+        'Add-Tool https://github.com/phpmd/phpmd/releases/latest/download/phpmd.phar phpmd "--version"',
+        'Add-Composertool phpunit-bridge phpunit-bridge symfony/ global',
+        'Add-Symfony',
+        'Add-Tool https://github.com/wp-cli/builds/blob/gh-pages/phar/wp-cli.phar?raw=true wp-cli "--version"'
+      ]
+    ]
+  ])('checking addTools on Windows', async (tools_csv, scripts) => {
+    const expected = await tools.addTools(tools_csv, '7.4', 'win32');
+    scripts.forEach(script => {
+      expect(expected).toContain(script);
+    });
   });
 
-  it('checking getWpCliUri', async () => {
-    expect(await tools.getWpCliUrl('latest')).toBe(
-      'wp-cli/builds/blob/gh-pages/phar/wp-cli.phar?raw=true'
-    );
-    expect(await tools.getWpCliUrl('2.4.0')).toBe(
-      'wp-cli/wp-cli/releases/download/v2.4.0/wp-cli-2.4.0.phar'
-    );
+  it.each([
+    [
+      'composer:v1, codeception/codeception, prestissimo, hirak/prestissimo, composer-prefetcher, narrowspark/automatic-composer-prefetcher, phinx: 1.2, robmorgan/phinx: ^1.2, user/tool:1.2.3, user/tool:~1.2',
+      [
+        'Add-Tool https://github.com/shivammathur/composer-cache/releases/latest/download/composer-7.4-1.phar,https://getcomposer.org/composer-1.phar composer',
+        'Add-Composertool codeception codeception codeception/ global',
+        'Add-Composertool prestissimo prestissimo hirak/ global',
+        'Add-Composertool automatic-composer-prefetcher automatic-composer-prefetcher narrowspark/ global',
+        'Add-Composertool phinx phinx:1.2.* robmorgan/ scoped',
+        'Add-Composertool phinx phinx:^1.2 robmorgan/ global',
+        'Add-Composertool tool tool:1.2.3 user/ global',
+        'Add-Composertool tool tool:~1.2 user/ global'
+      ]
+    ]
+  ])(
+    'checking addTools with composer tool using user/tool as input',
+    async (tools_csv, scripts) => {
+      const expected = await tools.addTools(tools_csv, '7.4', 'win32');
+      scripts.forEach(script => {
+        expect(expected).toContain(script);
+      });
+    }
+  );
+
+  it.each`
+    tools_csv                                             | script
+    ${'none'}                                             | ${''}
+    ${'none, phpunit'}                                    | ${'\nstep_log "Setup Tools"\nadd_tool https://github.com/shivammathur/composer-cache/releases/latest/download/composer-7.4-stable.phar,https://getcomposer.org/composer-stable.phar composer latest\n\nadd_tool https://phar.phpunit.de/phpunit.phar phpunit "--version"'}
+    ${'composer:preview'}                                 | ${'add_tool https://github.com/shivammathur/composer-cache/releases/latest/download/composer-7.4-preview.phar,https://getcomposer.org/composer-preview.phar composer preview'}
+    ${'composer, composer:v1'}                            | ${'add_tool https://github.com/shivammathur/composer-cache/releases/latest/download/composer-7.4-1.phar,https://getcomposer.org/composer-1.phar composer'}
+    ${'composer:v1, composer:preview, composer:snapshot'} | ${'add_tool https://github.com/shivammathur/composer-cache/releases/latest/download/composer-7.4-snapshot.phar,https://getcomposer.org/composer.phar composer snapshot'}
+  `('checking composer setup: $tools_csv', async ({tools_csv, script}) => {
+    expect(await tools.addTools(tools_csv, '7.4', 'linux')).toContain(script);
   });
 
-  it('checking addArchive', async () => {
-    let script: string = await tools.addArchive(
-      'tool',
-      'https://tool.com/tool.phar',
-      'linux',
-      '-v'
-    );
-    expect(script).toContain('add_tool https://tool.com/tool.phar tool');
-    script = await tools.addArchive(
-      'tool',
-      'https://tool.com/tool.phar',
-      'darwin',
-      '-v'
-    );
-    expect(script).toContain('add_tool https://tool.com/tool.phar tool');
-    script = await tools.addArchive(
-      'tool',
-      'https://tool.com/tool.phar',
-      'win32',
-      '-v'
-    );
-    expect(script).toContain('Add-Tool https://tool.com/tool.phar tool');
-
-    script = await tools.addArchive(
-      'tool',
-      'https://tool.com/tool.phar',
-      'openbsd',
-      '-v'
-    );
-    expect(script).toContain('Platform openbsd is not supported');
-  });
-
-  it('checking addDevTools', async () => {
-    let script: string = await tools.addDevTools('phpize', 'linux');
-    expect(script).toContain('add_devtools phpize');
-
-    script = await tools.addDevTools('php-config', 'linux');
-    expect(script).toContain('add_devtools php-config');
-
-    script = await tools.addDevTools('phpize', 'darwin');
-    expect(script).toContain('add_devtools phpize');
-
-    script = await tools.addDevTools('php-config', 'darwin');
-    expect(script).toContain('add_devtools php-config');
-
-    script = await tools.addDevTools('phpize', 'win32');
-    expect(script).toContain(
-      'Add-Log "$tick" "phpize" "phpize is not a windows tool"'
-    );
-
-    script = await tools.addDevTools('php-config', 'win32');
-    expect(script).toContain(
-      'Add-Log "$tick" "php-config" "php-config is not a windows tool"'
-    );
-
-    script = await tools.addDevTools('tool', 'openbsd');
-    expect(script).toContain('Platform openbsd is not supported');
-  });
-
-  it('checking addPackage', async () => {
-    let script: string = await tools.addPackage(
-      'tool',
-      'tool:1.2.3',
-      'user/',
-      'linux'
-    );
-    expect(script).toContain('add_composertool tool tool:1.2.3 user/');
-
-    script = await tools.addPackage('tool', 'tool:1.2.3', 'user/', 'darwin');
-    expect(script).toContain('add_composertool tool tool:1.2.3 user/');
-
-    script = await tools.addPackage('tool', 'tool:1.2.3', 'user/', 'win32');
-    expect(script).toContain('Add-Composertool tool tool:1.2.3 user/');
-
-    script = await tools.addPackage('tool', 'tool:1.2.3', 'user/', 'openbsd');
-    expect(script).toContain('Platform openbsd is not supported');
-  });
-
-  it('checking addTools on linux', async () => {
-    const script: string = await tools.addTools(
-      'blackfire, blackfire-player, cs2pr, flex, grpc_php_plugin, php-cs-fixer, phplint, phpstan, phpunit, pecl, phing, phinx, phinx:1.2.3, phive, php-config, phpize, protoc, symfony, wp-cli',
-      '7.4',
-      'linux'
-    );
-    expect(script).toContain('add_blackfire');
-    expect(script).toContain(
-      'add_tool https://get.blackfire.io/blackfire-player.phar blackfire-player "-V"'
-    );
-    expect(script).toContain(
-      'add_tool https://github.com/shivammathur/composer-cache/releases/latest/download/composer-stable.phar,https://getcomposer.org/composer-stable.phar composer'
-    );
-    expect(script).toContain(
-      'add_tool https://github.com/staabm/annotate-pull-request-from-checkstyle/releases/latest/download/cs2pr cs2pr "-V"'
-    );
-    expect(script).toContain(
-      'add_tool https://github.com/FriendsOfPHP/PHP-CS-Fixer/releases/latest/download/php-cs-fixer.phar php-cs-fixer "-V"'
-    );
-    expect(script).toContain(
-      'add_tool https://github.com/phpstan/phpstan/releases/latest/download/phpstan.phar phpstan "-V"'
-    );
-    expect(script).toContain(
-      'add_tool https://www.phing.info/get/phing-latest.phar phing "-v"'
-    );
-    expect(script).toContain(
-      'add_tool https://phar.io/releases/phive.phar phive status'
-    );
-    expect(script).toContain(
-      'add_tool https://phar.phpunit.de/phpunit.phar phpunit "--version"'
-    );
-    expect(script).toContain(
-      'add_tool https://github.com/symfony/cli/releases/latest/download/symfony_linux_amd64 symfony version'
-    );
-    expect(script).toContain(
-      'add_tool https://github.com/wp-cli/builds/blob/gh-pages/phar/wp-cli.phar?raw=true wp-cli "--version"'
-    );
-    expect(script).toContain('add_protoc latest');
-    expect(script).toContain('add_grpc_php_plugin latest');
-    expect(script).toContain('add_pecl');
-    expect(script).toContain('add_composertool flex flex symfony/');
-    expect(script).toContain('add_composertool phinx phinx robmorgan/');
-    expect(script).toContain('add_composertool phplint phplint overtrue/');
-    expect(script).toContain('add_composertool phinx phinx:1.2.3 robmorgan/');
-    expect(script).toContain('add_devtools php-config');
-    expect(script).toContain('add_devtools phpize');
-  });
-  it('checking addTools on darwin', async () => {
-    const listOfTools = [
-      'behat',
-      'blackfire',
-      'blackfire-player',
-      'composer-normalize',
-      'composer-require-checker',
-      'composer-unused',
-      'cs2pr:1.2.3',
-      'flex',
-      'grpc_php_plugin:1.2.3',
-      'infection',
-      'phan',
-      'phan:2.7.2',
-      'phing:1.2.3',
-      'phinx',
-      'phive:1.2.3',
-      'php-config',
-      'phpcbf',
-      'phpcpd',
-      'phpcs',
-      'phpize',
-      'phpmd',
-      'phpspec',
-      'protoc:v1.2.3',
-      'psalm',
-      'symfony',
-      'symfony:1.2.3',
-      'vapor-cli',
-      'wp-cli'
-    ];
-
-    const script: string = await tools.addTools(
-      listOfTools.join(', '),
-      '7.4',
-      'darwin'
-    );
-
-    expect(script).toContain('add_blackfire');
-    expect(script).toContain(
-      'add_tool https://get.blackfire.io/blackfire-player.phar blackfire-player "-V"'
-    );
-    expect(script).toContain(
-      'add_tool https://github.com/shivammathur/composer-cache/releases/latest/download/composer-stable.phar,https://getcomposer.org/composer-stable.phar composer'
-    );
-    expect(script).toContain(
-      'add_tool https://github.com/ergebnis/composer-normalize/releases/latest/download/composer-normalize.phar composer-normalize "-V"'
-    );
-    expect(script).toContain(
-      'add_tool https://github.com/maglnet/ComposerRequireChecker/releases/latest/download/composer-require-checker.phar composer-require-checker "-V"'
-    );
-    expect(script).toContain(
-      'add_tool https://github.com/staabm/annotate-pull-request-from-checkstyle/releases/download/1.2.3/cs2pr cs2pr "-V"'
-    );
-    expect(script).toContain(
-      'add_tool https://github.com/infection/infection/releases/latest/download/infection.phar infection "-V"'
-    );
-    expect(script).toContain(
-      'add_tool https://github.com/phan/phan/releases/latest/download/phan.phar phan "-v"'
-    );
-    expect(script).toContain(
-      'add_tool https://www.phing.info/get/phing-1.2.3.phar phing "-v"'
-    );
-    expect(script).toContain(
-      'add_tool https://github.com/squizlabs/PHP_CodeSniffer/releases/latest/download/phpcs.phar phpcs "--version"'
-    );
-    expect(script).toContain(
-      'add_tool https://github.com/squizlabs/PHP_CodeSniffer/releases/latest/download/phpcbf.phar phpcbf "--version"'
-    );
-    expect(script).toContain(
-      'add_tool https://phar.phpunit.de/phpcpd.phar phpcpd "--version"'
-    );
-    expect(script).toContain(
-      'add_tool https://github.com/phpmd/phpmd/releases/latest/download/phpmd.phar phpmd "--version"'
-    );
-    expect(script).toContain(
-      'https://github.com/vimeo/psalm/releases/latest/download/psalm.phar psalm "-v"'
-    );
-    expect(script).toContain('add_grpc_php_plugin 1.2.3');
-    expect(script).toContain('add_protoc 1.2.3');
-    expect(script).toContain('add_composertool behat behat behat/');
-    expect(script).toContain('add_composertool phpspec phpspec phpspec/');
-    expect(script).toContain('add_composertool vapor-cli vapor-cli laravel/');
-    expect(script).toContain('add_composertool flex flex symfony/');
-    expect(script).toContain('add_composertool phinx phinx robmorgan/');
-    expect(script).toContain(
-      'add_tool https://github.com/phan/phan/releases/download/2.7.2/phan.phar phan "-v"'
-    );
-    expect(script).toContain(
-      'add_tool https://github.com/phar-io/phive/releases/download/1.2.3/phive-1.2.3.phar phive'
-    );
-    expect(script).toContain(
-      'add_composertool composer-unused composer-unused icanhazstring/'
-    );
-    expect(script).toContain(
-      'add_tool https://github.com/symfony/cli/releases/latest/download/symfony_darwin_amd64 symfony version'
-    );
-    expect(script).toContain(
-      'add_tool https://github.com/symfony/cli/releases/download/v1.2.3/symfony_darwin_amd64 symfony version'
-    );
-    expect(script).toContain(
-      'add_tool https://github.com/wp-cli/builds/blob/gh-pages/phar/wp-cli.phar?raw=true wp-cli "--version"'
-    );
-    expect(script).toContain('add_devtools phpize');
-    expect(script).toContain('add_devtools php-config');
-  });
-  it('checking addTools on windows', async () => {
-    const listOfTools = [
-      'blackfire',
-      'blackfire-player:1.8.1',
-      'codeception',
-      'cs2pr',
-      'deployer',
-      'does_not_exist',
-      'flex',
-      'phinx',
-      'phive:0.13.2',
-      'php-config',
-      'phpize',
-      'phpmd',
-      'symfony',
-      'wp-cli'
-    ];
-
-    const script: string = await tools.addTools(
-      listOfTools.join(', '),
-      '7.4',
-      'win32'
-    );
-
-    expect(script).toContain('Add-Blackfire');
-    expect(script).toContain(
-      'Add-Tool https://get.blackfire.io/blackfire-player-v1.8.1.phar blackfire-player "-V"'
-    );
-    expect(script).toContain(
-      'Add-Tool https://github.com/shivammathur/composer-cache/releases/latest/download/composer-stable.phar,https://getcomposer.org/composer-stable.phar composer'
-    );
-    expect(script).toContain(
-      'Add-Tool https://github.com/staabm/annotate-pull-request-from-checkstyle/releases/latest/download/cs2pr cs2pr "-V"'
-    );
-    expect(script).toContain('Add-Composertool flex flex symfony/');
-    expect(script).toContain(
-      'Add-Tool https://deployer.org/deployer.phar deployer "-V"'
-    );
-    expect(script).toContain(
-      'Add-Tool https://github.com/phpmd/phpmd/releases/latest/download/phpmd.phar phpmd "--version"'
-    );
-    expect(script).toContain('Add-Composertool phinx phinx robmorgan/');
-    expect(script).toContain(
-      'Add-Tool https://github.com/phar-io/phive/releases/download/0.13.2/phive-0.13.2.phar phive status'
-    );
-    expect(script).toContain(
-      'Add-Tool https://github.com/symfony/cli/releases/latest/download/symfony_windows_amd64.exe symfony version'
-    );
-    expect(script).toContain(
-      'Add-Tool https://github.com/wp-cli/builds/blob/gh-pages/phar/wp-cli.phar?raw=true wp-cli "--version"'
-    );
-    expect(script).toContain('phpize is not a windows tool');
-    expect(script).toContain('php-config is not a windows tool');
-    expect(script).toContain('Tool does_not_exist is not supported');
-  });
-  it('checking addTools with composer tool using user/tool as input', async () => {
-    const listOfTools = [
-      'hirak/prestissimo',
-      'narrowspark/automatic-composer-prefetcher',
-      'robmorgan/phinx'
-    ];
-
-    const script: string = await tools.addTools(
-      listOfTools.join(', '),
-      '7.4',
-      'win32'
-    );
-
-    expect(script).toContain(
-      'Add-Tool https://github.com/shivammathur/composer-cache/releases/latest/download/composer-1.phar,https://getcomposer.org/composer-1.phar composer'
-    );
-    expect(script).toContain('Add-Composertool prestissimo prestissimo hirak/');
-    expect(script).toContain('Add-Composertool phinx phinx robmorgan/');
-    expect(script).toContain(
-      'Add-Composertool composer-prefetcher composer-prefetcher narrowspark/automatic-'
-    );
-  });
-  it('checking composer setup', async () => {
-    const listOfTools = ['composer', 'composer:v1'];
-
-    let script: string = await tools.addTools(
-      listOfTools.join(', '),
-      '7.4',
-      'linux'
-    );
-
-    expect(script).toContain(
-      'add_tool https://github.com/shivammathur/composer-cache/releases/latest/download/composer-1.phar,https://getcomposer.org/composer-1.phar composer'
-    );
-
-    script = await tools.addTools('composer:preview', '7.4', 'linux');
-    expect(script).toContain(
-      'add_tool https://github.com/shivammathur/composer-cache/releases/latest/download/composer-preview.phar,https://getcomposer.org/composer-preview.phar composer preview'
-    );
-    script = await tools.addTools(
-      'composer:v1, composer:preview, composer:snapshot',
-      '7.4',
-      'linux'
-    );
-    expect(script).toContain(
-      'add_tool https://github.com/shivammathur/composer-cache/releases/latest/download/composer-snapshot.phar,https://getcomposer.org/composer.phar composer snapshot'
-    );
+  it.each`
+    tools_csv        | token              | script
+    ${'cs2pr:1.2'}   | ${'invalid_token'} | ${'add_log "$cross" "cs2pr" "Invalid token"'}
+    ${'phpunit:1.2'} | ${'invalid_token'} | ${'add_log "$cross" "phpunit" "Invalid token"'}
+    ${'phpunit:0.1'} | ${'no_data'}       | ${'add_log "$cross" "phpunit" "No version found with prefix 0.1."'}
+  `('checking error: $tools_csv', async ({tools_csv, token, script}) => {
+    process.env['COMPOSER_TOKEN'] = token;
+    expect(await tools.addTools(tools_csv, '7.4', 'linux')).toContain(script);
   });
 });

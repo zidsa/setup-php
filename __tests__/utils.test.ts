@@ -1,25 +1,32 @@
-import * as fs from 'fs';
 import * as path from 'path';
 import * as utils from '../src/utils';
 
+/**
+ * Mock @actions/core
+ */
 jest.mock('@actions/core', () => ({
   getInput: jest.fn().mockImplementation(key => {
     return ['setup-php'].indexOf(key) !== -1 ? key : '';
   })
 }));
 
-async function cleanup(path: string): Promise<void> {
-  fs.unlink(path, error => {
-    if (error) {
-      console.log(error);
-    }
-  });
-}
+/**
+ * Mock fetch.ts
+ */
+jest.mock('../src/fetch', () => ({
+  fetch: jest.fn().mockImplementation(() => {
+    return {data: '{ "latest": "8.1", "5.x": "5.6" }'};
+  })
+}));
 
 describe('Utils tests', () => {
   it('checking readEnv', async () => {
     process.env['test'] = 'setup-php';
+    process.env['test-hyphen'] = 'setup-php';
     expect(await utils.readEnv('test')).toBe('setup-php');
+    expect(await utils.readEnv('TEST')).toBe('setup-php');
+    expect(await utils.readEnv('test_hyphen')).toBe('setup-php');
+    expect(await utils.readEnv('TEST_HYPHEN')).toBe('setup-php');
     expect(await utils.readEnv('undefined')).toBe('');
   });
 
@@ -28,25 +35,41 @@ describe('Utils tests', () => {
     expect(await utils.getInput('test', false)).toBe('setup-php');
     expect(await utils.getInput('setup-php', false)).toBe('setup-php');
     expect(await utils.getInput('DoesNotExist', false)).toBe('');
-    expect(async () => {
+    await expect(async () => {
       await utils.getInput('DoesNotExist', true);
     }).rejects.toThrow('Input required and not supplied: DoesNotExist');
   });
 
+  it('checking getManifestURL', async () => {
+    expect(await utils.getManifestURL()).toContain('php-versions.json');
+  });
+
   it('checking parseVersion', async () => {
+    expect(await utils.parseVersion('latest')).toBe('8.1');
     expect(await utils.parseVersion('7')).toBe('7.0');
     expect(await utils.parseVersion('7.4')).toBe('7.4');
-    expect(await utils.parseVersion('latest')).toBe('7.4');
+    expect(await utils.parseVersion('5.x')).toBe('5.6');
+    expect(await utils.parseVersion('4.x')).toBe(undefined);
+  });
+
+  it('checking parseIniFile', async () => {
+    expect(await utils.parseIniFile('production')).toBe('production');
+    expect(await utils.parseIniFile('development')).toBe('development');
+    expect(await utils.parseIniFile('none')).toBe('none');
+    expect(await utils.parseIniFile('php.ini-production')).toBe('production');
+    expect(await utils.parseIniFile('php.ini-development')).toBe('development');
+    expect(await utils.parseIniFile('invalid')).toBe('production');
   });
 
   it('checking asyncForEach', async () => {
     const array: Array<string> = ['a', 'b', 'c'];
     let concat = '';
-    await utils.asyncForEach(array, async function (
-      str: string
-    ): Promise<void> {
-      concat += str;
-    });
+    await utils.asyncForEach(
+      array,
+      async function (str: string): Promise<void> {
+        concat += str;
+      }
+    );
     expect(concat).toBe('abc');
   });
 
@@ -57,48 +80,10 @@ describe('Utils tests', () => {
     expect(await utils.color('warning')).toBe('33');
   });
 
-  it('checking readScripts', async () => {
-    const darwin: string = fs.readFileSync(
-      path.join(__dirname, '../src/scripts/darwin.sh'),
-      'utf8'
-    );
-    const linux: string = fs.readFileSync(
-      path.join(__dirname, '../src/scripts/linux.sh'),
-      'utf8'
-    );
-    const win32: string = fs.readFileSync(
-      path.join(__dirname, '../src/scripts/win32.ps1'),
-      'utf8'
-    );
-    expect(await utils.readScript('darwin.sh')).toBe(darwin);
-    expect(await utils.readScript('darwin.sh')).toBe(darwin);
-    expect(await utils.readScript('linux.sh')).toBe(linux);
-    expect(await utils.readScript('linux.sh')).toBe(linux);
-    expect(await utils.readScript('win32.ps1')).toBe(win32);
-    expect(await utils.readScript('win32.ps1')).toBe(win32);
-  });
-
-  it('checking writeScripts', async () => {
-    const testString = 'sudo apt-get install php';
-    const runner_dir: string = process.env['RUNNER_TOOL_CACHE'] || '';
-    const script_path: string = path.join(runner_dir, 'test.sh');
-    await utils.writeScript('test.sh', testString);
-    await fs.readFile(script_path, function (
-      error: Error | null,
-      data: Buffer
-    ) {
-      expect(testString).toBe(data.toString());
-    });
-    await cleanup(script_path);
-  });
-
   it('checking extensionArray', async () => {
-    expect(await utils.extensionArray('a, b, php_c, php-d')).toEqual([
-      'a',
-      'b',
-      'c',
-      'd'
-    ]);
+    expect(
+      await utils.extensionArray('a, :b, php_c, none, php-d, Zend e, :Zend f')
+    ).toEqual(['none', 'a', ':b', 'c', 'd', 'e', ':f']);
 
     expect(await utils.extensionArray('')).toEqual([]);
     expect(await utils.extensionArray(' ')).toEqual([]);
@@ -110,6 +95,20 @@ describe('Utils tests', () => {
       'b=2',
       'c=3'
     ]);
+    expect(await utils.CSVArray('\'a=1,2\', "b=3, 4", c=5, d=~e~')).toEqual([
+      'a=1,2',
+      'b=3, 4',
+      'c=5',
+      "d='~e~'"
+    ]);
+    expect(await utils.CSVArray('a=\'1,2\', b="3, 4", c=5')).toEqual([
+      'a=1,2',
+      'b=3, 4',
+      'c=5'
+    ]);
+    expect(
+      await utils.CSVArray('a=E_ALL, b=E_ALL & ~ E_ALL, c="E_ALL", d=\'E_ALL\'')
+    ).toEqual(['a=E_ALL', 'b=E_ALL & ~ E_ALL', 'c=E_ALL', 'd=E_ALL']);
     expect(await utils.CSVArray('')).toEqual([]);
     expect(await utils.CSVArray(' ')).toEqual([]);
   });
@@ -210,9 +209,9 @@ describe('Utils tests', () => {
   });
 
   it('checking scriptTool', async () => {
-    expect(await utils.scriptTool('linux')).toBe('bash');
-    expect(await utils.scriptTool('darwin')).toBe('bash');
-    expect(await utils.scriptTool('win32')).toBe('pwsh');
+    expect(await utils.scriptTool('linux')).toBe('bash ');
+    expect(await utils.scriptTool('darwin')).toBe('bash ');
+    expect(await utils.scriptTool('win32')).toBe('pwsh ');
     expect(await utils.scriptTool('openbsd')).toContain(
       'Platform openbsd is not supported'
     );
@@ -229,5 +228,32 @@ describe('Utils tests', () => {
     expect(
       await utils.customPackage('pkg8', 'ext', '1.2.3', 'linux')
     ).toContain(script_path + '\nadd_pkg 1.2.3');
+  });
+
+  it('checking parseExtensionSource', async () => {
+    expect(
+      await utils.parseExtensionSource(
+        'ext-org-name/repo-name@release',
+        'extension'
+      )
+    ).toContain(
+      '\nadd_extension_from_source ext https://github.com org-name repo-name release extension'
+    );
+    expect(
+      await utils.parseExtensionSource(
+        'ext-https://sub.domain.tld/org/repo@release',
+        'extension'
+      )
+    ).toContain(
+      '\nadd_extension_from_source ext https://sub.domain.tld org repo release extension'
+    );
+    expect(
+      await utils.parseExtensionSource(
+        'ext-https://sub.domain.XN--tld/org/repo@release',
+        'extension'
+      )
+    ).toContain(
+      '\nadd_extension_from_source ext https://sub.domain.XN--tld org repo release extension'
+    );
   });
 });

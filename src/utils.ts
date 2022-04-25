@@ -1,6 +1,6 @@
-import * as fs from 'fs';
 import * as path from 'path';
 import * as core from '@actions/core';
+import * as fetch from './fetch';
 
 /**
  * Function to read environment variable and return a string value.
@@ -8,13 +8,16 @@ import * as core from '@actions/core';
  * @param property
  */
 export async function readEnv(property: string): Promise<string> {
-  const value = process.env[property];
-  switch (value) {
-    case undefined:
-      return '';
-    default:
-      return value;
-  }
+  const property_lc: string = property.toLowerCase();
+  const property_uc: string = property.toUpperCase();
+  return (
+    process.env[property] ||
+    process.env[property_lc] ||
+    process.env[property_uc] ||
+    process.env[property_lc.replace('_', '-')] ||
+    process.env[property_uc.replace('_', '-')] ||
+    ''
+  );
 }
 
 /**
@@ -41,15 +44,23 @@ export async function getInput(
   }
 }
 
+/** Function to get manifest URL
+ *
+ */
+export async function getManifestURL(): Promise<string> {
+  return 'https://raw.githubusercontent.com/shivammathur/setup-php/develop/src/configs/php-versions.json';
+}
+
 /**
  * Function to parse PHP version.
  *
  * @param version
  */
 export async function parseVersion(version: string): Promise<string> {
-  switch (version) {
-    case 'latest':
-      return '7.4';
+  const manifest = await getManifestURL();
+  switch (true) {
+    case /^(latest|nightly|\d+\.x)$/.test(version):
+      return JSON.parse((await fetch.fetch(manifest))['data'])[version];
     default:
       switch (true) {
         case version.length > 1:
@@ -57,6 +68,22 @@ export async function parseVersion(version: string): Promise<string> {
         default:
           return version + '.0';
       }
+  }
+}
+
+/**
+ * Function to parse ini file.
+ *
+ * @param ini_file
+ */
+export async function parseIniFile(ini_file: string): Promise<string> {
+  switch (true) {
+    case /^(production|development|none)$/.test(ini_file):
+      return ini_file;
+    case /php\.ini-(production|development)$/.test(ini_file):
+      return ini_file.split('-')[1];
+    default:
+      return 'production';
   }
 }
 
@@ -101,15 +128,15 @@ export async function color(type: string): Promise<string> {
  * Log to console
  *
  * @param message
- * @param os_version
+ * @param os
  * @param log_type
  */
 export async function log(
   message: string,
-  os_version: string,
+  os: string,
   log_type: string
 ): Promise<string> {
-  switch (os_version) {
+  switch (os) {
     case 'win32':
       return (
         'printf "\\033[' +
@@ -132,24 +159,17 @@ export async function log(
  * Function to log a step
  *
  * @param message
- * @param os_version
+ * @param os
  */
-export async function stepLog(
-  message: string,
-  os_version: string
-): Promise<string> {
-  switch (os_version) {
+export async function stepLog(message: string, os: string): Promise<string> {
+  switch (os) {
     case 'win32':
       return 'Step-Log "' + message + '"';
     case 'linux':
     case 'darwin':
       return 'step_log "' + message + '"';
     default:
-      return await log(
-        'Platform ' + os_version + ' is not supported',
-        os_version,
-        'error'
-      );
+      return await log('Platform ' + os + ' is not supported', os, 'error');
   }
 }
 
@@ -158,55 +178,23 @@ export async function stepLog(
  * @param mark
  * @param subject
  * @param message
- * @param os_version
+ * @param os
  */
 export async function addLog(
   mark: string,
   subject: string,
   message: string,
-  os_version: string
+  os: string
 ): Promise<string> {
-  switch (os_version) {
+  switch (os) {
     case 'win32':
       return 'Add-Log "' + mark + '" "' + subject + '" "' + message + '"';
     case 'linux':
     case 'darwin':
       return 'add_log "' + mark + '" "' + subject + '" "' + message + '"';
     default:
-      return await log(
-        'Platform ' + os_version + ' is not supported',
-        os_version,
-        'error'
-      );
+      return await log('Platform ' + os + ' is not supported', os, 'error');
   }
-}
-
-/**
- * Read the scripts
- *
- * @param filename
- */
-export async function readScript(filename: string): Promise<string> {
-  return fs.readFileSync(
-    path.join(__dirname, '../src/scripts/' + filename),
-    'utf8'
-  );
-}
-
-/**
- * Write final script which runs
- *
- * @param filename
- * @param script
- */
-export async function writeScript(
-  filename: string,
-  script: string
-): Promise<string> {
-  const runner_dir: string = await getInput('RUNNER_TOOL_CACHE', false);
-  const script_path: string = path.join(runner_dir, filename);
-  fs.writeFileSync(script_path, script, {mode: 0o755});
-  return script_path;
 }
 
 /**
@@ -222,16 +210,21 @@ export async function extensionArray(
     case ' ':
       return [];
     default:
-      return extension_csv
-        .split(',')
-        .map(function (extension: string) {
-          return extension
-            .trim()
-            .toLowerCase()
-            .replace('php-', '')
-            .replace('php_', '');
-        })
-        .filter(Boolean);
+      return [
+        extension_csv.match(/(^|,\s?)none(\s?,|$)/) ? 'none' : '',
+        ...extension_csv
+          .split(',')
+
+          .map(function (extension: string) {
+            if (/.+-.+\/.+@.+/.test(extension)) {
+              return extension;
+            }
+            return extension
+              .trim()
+              .toLowerCase()
+              .replace(/^(:)?(php[-_]|none|zend )|(-[^-]*)-/, '$1$3');
+          })
+      ].filter(Boolean);
   }
 }
 
@@ -248,9 +241,12 @@ export async function CSVArray(values_csv: string): Promise<Array<string>> {
       return [];
     default:
       return values_csv
-        .split(',')
-        .map(function (value: string) {
-          return value.trim();
+        .split(/,(?=(?:(?:[^"']*["']){2})*[^"']*$)/)
+        .map(function (value) {
+          return value
+            .trim()
+            .replace(/^["']|["']$|(?<==)["']/g, '')
+            .replace(/=(((?!E_).)*[?{}|&~![()^]+((?!E_).)+)/, "='$1'");
         })
         .filter(Boolean);
   }
@@ -262,39 +258,28 @@ export async function CSVArray(values_csv: string): Promise<Array<string>> {
  * @param extension
  */
 export async function getExtensionPrefix(extension: string): Promise<string> {
-  const zend: Array<string> = [
-    'xdebug',
-    'xdebug3',
-    'opcache',
-    'ioncube',
-    'eaccelerator'
-  ];
-  switch (zend.indexOf(extension)) {
+  switch (true) {
     default:
-      return 'zend_extension';
-    case -1:
       return 'extension';
+    case /xdebug([2-3])?$|opcache|ioncube|eaccelerator/.test(extension):
+      return 'zend_extension';
   }
 }
 
 /**
  * Function to get the suffix to suppress console output
  *
- * @param os_version
+ * @param os
  */
-export async function suppressOutput(os_version: string): Promise<string> {
-  switch (os_version) {
+export async function suppressOutput(os: string): Promise<string> {
+  switch (os) {
     case 'win32':
       return ' >$null 2>&1';
     case 'linux':
     case 'darwin':
       return ' >/dev/null 2>&1';
     default:
-      return await log(
-        'Platform ' + os_version + ' is not supported',
-        os_version,
-        'error'
-      );
+      return await log('Platform ' + os + ' is not supported', os, 'error');
   }
 }
 
@@ -303,12 +288,12 @@ export async function suppressOutput(os_version: string): Promise<string> {
  *
  * @param extension
  * @param version
- * @param os_version
+ * @param os
  */
 export async function getUnsupportedLog(
   extension: string,
   version: string,
-  os_version: string
+  os: string
 ): Promise<string> {
   return (
     '\n' +
@@ -316,7 +301,7 @@ export async function getUnsupportedLog(
       '$cross',
       extension,
       [extension, 'is not supported on PHP', version].join(' '),
-      os_version
+      os
     )) +
     '\n'
   );
@@ -325,25 +310,18 @@ export async function getUnsupportedLog(
 /**
  * Function to get command to setup tools
  *
- * @param os_version
+ * @param os
  * @param suffix
  */
-export async function getCommand(
-  os_version: string,
-  suffix: string
-): Promise<string> {
-  switch (os_version) {
+export async function getCommand(os: string, suffix: string): Promise<string> {
+  switch (os) {
     case 'linux':
     case 'darwin':
       return 'add_' + suffix + ' ';
     case 'win32':
       return 'Add-' + suffix.charAt(0).toUpperCase() + suffix.slice(1) + ' ';
     default:
-      return await log(
-        'Platform ' + os_version + ' is not supported',
-        os_version,
-        'error'
-      );
+      return await log('Platform ' + os + ' is not supported', os, 'error');
   }
 }
 
@@ -359,42 +337,34 @@ export async function joins(...str: string[]): Promise<string> {
 /**
  * Function to get script extensions
  *
- * @param os_version
+ * @param os
  */
-export async function scriptExtension(os_version: string): Promise<string> {
-  switch (os_version) {
+export async function scriptExtension(os: string): Promise<string> {
+  switch (os) {
     case 'win32':
       return '.ps1';
     case 'linux':
     case 'darwin':
       return '.sh';
     default:
-      return await log(
-        'Platform ' + os_version + ' is not supported',
-        os_version,
-        'error'
-      );
+      return await log('Platform ' + os + ' is not supported', os, 'error');
   }
 }
 
 /**
  * Function to get script tool
  *
- * @param os_version
+ * @param os
  */
-export async function scriptTool(os_version: string): Promise<string> {
-  switch (os_version) {
+export async function scriptTool(os: string): Promise<string> {
+  switch (os) {
     case 'win32':
-      return 'pwsh';
+      return 'pwsh ';
     case 'linux':
     case 'darwin':
-      return 'bash';
+      return 'bash ';
     default:
-      return await log(
-        'Platform ' + os_version + ' is not supported',
-        os_version,
-        'error'
-      );
+      return await log('Platform ' + os + ' is not supported', os, 'error');
   }
 }
 
@@ -404,20 +374,42 @@ export async function scriptTool(os_version: string): Promise<string> {
  * @param pkg
  * @param type
  * @param version
- * @param os_version
+ * @param os
  */
 export async function customPackage(
   pkg: string,
   type: string,
   version: string,
-  os_version: string
+  os: string
 ): Promise<string> {
-  const pkg_name: string = pkg.replace(/\d+|pdo[_-]/, '');
-  const script_extension: string = await scriptExtension(os_version);
+  const pkg_name: string = pkg.replace(/\d+|(pdo|pecl)[_-]/, '');
+  const script_extension: string = await scriptExtension(os);
   const script: string = path.join(
     __dirname,
     '../src/scripts/' + type + '/' + pkg_name + script_extension
   );
-  const command: string = await getCommand(os_version, pkg_name);
+  const command: string = await getCommand(os, pkg_name);
   return '\n. ' + script + '\n' + command + version;
+}
+
+/**
+ * Function to extension input for installation from source.
+ *
+ * @param extension
+ * @param prefix
+ */
+export async function parseExtensionSource(
+  extension: string,
+  prefix: string
+): Promise<string> {
+  // Groups: extension, domain url, org, repo, release
+  const regex =
+    /(\w+)-(\w+:\/\/.{1,253}(?:[.:][^:/\s]{2,63})+\/)?([\w.-]+)\/([\w.-]+)@(.+)/;
+  const matches = regex.exec(extension) as RegExpExecArray;
+  matches[2] = matches[2] ? matches[2].slice(0, -1) : 'https://github.com';
+  return await joins(
+    '\nadd_extension_from_source',
+    ...matches.splice(1, matches.length),
+    prefix
+  );
 }

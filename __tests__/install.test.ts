@@ -5,171 +5,78 @@ import * as utils from '../src/utils';
  * Mock install.ts
  */
 jest.mock('../src/install', () => ({
-  getScript: jest.fn().mockImplementation(
-    async (
-      filename: string,
-      version: string,
-      os_version: string
-    ): Promise<string> => {
-      const extension_csv: string = process.env['extensions'] || '';
-      const ini_values_csv: string = process.env['ini-values'] || '';
-      const coverage_driver: string = process.env['coverage'] || '';
-      let tools_csv: string = process.env['tools'] || '';
-      const pecl: string = process.env['pecl'] || '';
-      if (pecl == 'true') {
-        tools_csv = 'pecl, ' + tools_csv;
-      }
-
-      let script = 'initial script ' + filename + version + os_version;
-      if (tools_csv) {
-        script += 'add_tool';
-      }
-      if (extension_csv) {
-        script += 'install extensions';
-      }
-      if (coverage_driver) {
-        script += 'set coverage driver';
-      }
-      if (ini_values_csv) {
-        script += 'edit php.ini';
-      }
-
-      return script;
-    }
-  ),
-  run: jest.fn().mockImplementation(
-    async (): Promise<string> => {
-      const os_version: string = process.env['RUNNER_OS'] || '';
+  getScript: jest
+    .fn()
+    .mockImplementation(async (os: string): Promise<string> => {
+      const filename = os + (await utils.scriptExtension(os));
       const version: string = await utils.parseVersion(
         await utils.getInput('php-version', true)
       );
-      const tool = await utils.scriptTool(os_version);
-      const filename = os_version + (await utils.scriptExtension(os_version));
-      return [
-        await install.getScript(filename, version, os_version),
-        tool,
-        filename,
-        version,
-        __dirname
-      ].join(' ');
-    }
-  )
+      const ini_file: string = await utils.parseIniFile(
+        await utils.getInput('ini-file', false)
+      );
+      const extension_csv: string = process.env['extensions'] || '';
+      const ini_values_csv: string = process.env['ini-values'] || '';
+      const coverage_driver: string = process.env['coverage'] || '';
+      const tools_csv: string = process.env['tools'] || '';
+      let script = await utils.joins(filename, version, ini_file);
+      script += extension_csv ? ' install extensions' : '';
+      script += tools_csv ? ' add_tool' : '';
+      script += coverage_driver ? ' set coverage driver' : '';
+      script += ini_values_csv ? ' edit php.ini' : '';
+      return script;
+    }),
+  run: jest.fn().mockImplementation(async (): Promise<string> => {
+    const os: string = process.env['RUNNER_OS'] || '';
+    const tool = await utils.scriptTool(os);
+    return tool + (await install.getScript(os));
+  })
 }));
 
 /**
- * Function to set the process.env
- *
- * @param version
- * @param os
- * @param extension_csv
- * @param ini_values_csv
- * @param coverage_driver
- * @param tools
+ * Mock fetch.ts
  */
-function setEnv(
-  version: string | number,
-  os: string,
-  extension_csv: string,
-  ini_values_csv: string,
-  coverage_driver: string,
-  tools: string
-): void {
-  process.env['php-version'] = version.toString();
-  process.env['RUNNER_OS'] = os;
-  process.env['extensions'] = extension_csv;
-  process.env['ini-values'] = ini_values_csv;
-  process.env['coverage'] = coverage_driver;
-  process.env['tools'] = tools;
-}
+jest.mock('../src/fetch', () => ({
+  fetch: jest.fn().mockImplementation(() => {
+    return {data: '{ "latest": "8.1", "5.x": "5.6" }'};
+  })
+}));
 
 describe('Install', () => {
-  it('Test install on windows', async () => {
-    setEnv('7.0', 'win32', '', '', '', '');
-
-    let script: string = '' + (await install.run());
-    expect(script).toContain('initial script');
-    expect(script).toContain('pwsh win32.ps1 7.0 ' + __dirname);
-
-    setEnv('7.3', 'win32', '', '', '', '');
-
-    script = '' + (await install.run());
-    expect(script).toContain('initial script');
-    expect(script).toContain('pwsh win32.ps1 7.3 ' + __dirname);
-
-    setEnv('7.3', 'win32', 'a, b', 'a=b', 'x', '');
-
-    script = '' + (await install.run());
-    expect(script).toContain('initial script');
-    expect(script).toContain('install extensions');
-    expect(script).toContain('edit php.ini');
-    expect(script).toContain('set coverage driver');
-    expect(script).toContain('pwsh win32.ps1 7.3 ' + __dirname);
-  });
-
-  it('Test install on linux', async () => {
-    setEnv('7.3', 'linux', '', '', '', '');
-
-    let script: string = '' + (await install.run());
-    expect(script).toContain('initial script');
-    expect(script).toContain('bash linux.sh 7.3 ');
-
-    setEnv('latest', 'linux', '', '', '', '');
-
-    script = '' + (await install.run());
-    expect(script).toContain('initial script');
-    expect(script).toContain('bash linux.sh 7.4 ');
-
-    setEnv('7.3', 'linux', 'a, b', 'a=b', 'x', 'phpunit');
-
-    script = '' + (await install.run());
-    expect(script).toContain('initial script');
-    expect(script).toContain('install extensions');
-    expect(script).toContain('edit php.ini');
-    expect(script).toContain('set coverage driver');
-    expect(script).toContain('bash linux.sh 7.3');
-    expect(script).toContain('add_tool');
-  });
-
-  it('Test install on darwin', async () => {
-    setEnv('7.3', 'darwin', '', '', '', '');
-
-    let script: string = '' + (await install.run());
-    expect(script).toContain('initial script');
-    expect(script).toContain('bash darwin.sh 7.3 ' + __dirname);
-
-    setEnv('7.3', 'darwin', 'a, b', 'a=b', 'x', '');
-
-    script = '' + (await install.run());
-    expect(script).toContain('initial script');
-    expect(script).toContain('install extensions');
-    expect(script).toContain('edit php.ini');
-    expect(script).toContain('set coverage driver');
-    expect(script).toContain('bash darwin.sh 7.3 ' + __dirname);
-  });
-
-  it('Test malformed version inputs', async () => {
-    setEnv('7.4.1', 'darwin', '', '', '', '');
-
-    let script: string = '' + '' + (await install.run());
-    expect(script).toContain('initial script');
-    expect(script).toContain('bash darwin.sh 7.4 ' + __dirname);
-
-    setEnv(8.0, 'darwin', '', '', '', '');
-
-    script = '' + (await install.run());
-    expect(script).toContain('initial script');
-    expect(script).toContain('bash darwin.sh 8.0 ' + __dirname);
-
-    setEnv(8, 'darwin', '', '', '', '');
-
-    script = '' + (await install.run());
-    expect(script).toContain('initial script');
-    expect(script).toContain('bash darwin.sh 8.0 ' + __dirname);
-
-    setEnv(8.1, 'darwin', '', '', '', '');
-
-    script = '' + (await install.run());
-    expect(script).toContain('initial script');
-    expect(script).toContain('bash darwin.sh 8.1 ' + __dirname);
-  });
+  it.each`
+    version     | os          | extension_csv | ini_file         | ini_values_csv | coverage_driver | tools        | output
+    ${'7.3'}    | ${'darwin'} | ${''}         | ${'production'}  | ${''}          | ${''}           | ${''}        | ${'bash darwin.sh 7.3 production'}
+    ${'7.3'}    | ${'darwin'} | ${'a, b'}     | ${'development'} | ${'a=b'}       | ${'x'}          | ${''}        | ${'bash darwin.sh 7.3 development install extensions set coverage driver edit php.ini'}
+    ${'7.4.1'}  | ${'darwin'} | ${''}         | ${'none'}        | ${''}          | ${''}           | ${''}        | ${'bash darwin.sh 7.4 none'}
+    ${'8'}      | ${'darwin'} | ${''}         | ${''}            | ${''}          | ${''}           | ${''}        | ${'bash darwin.sh 8.0 production'}
+    ${'8.0'}    | ${'darwin'} | ${''}         | ${'development'} | ${''}          | ${''}           | ${''}        | ${'bash darwin.sh 8.0 development'}
+    ${'8.1'}    | ${'darwin'} | ${''}         | ${'none'}        | ${''}          | ${''}           | ${''}        | ${'bash darwin.sh 8.1 none'}
+    ${'7.3'}    | ${'linux'}  | ${''}         | ${'invalid'}     | ${''}          | ${''}           | ${''}        | ${'bash linux.sh 7.3 production'}
+    ${'7.3'}    | ${'linux'}  | ${'a, b'}     | ${'development'} | ${'a=b'}       | ${'x'}          | ${'phpunit'} | ${'bash linux.sh 7.3 development install extensions add_tool set coverage driver edit php.ini'}
+    ${'latest'} | ${'linux'}  | ${''}         | ${'none'}        | ${''}          | ${''}           | ${''}        | ${'bash linux.sh 8.1 none'}
+    ${'7.0'}    | ${'win32'}  | ${''}         | ${'production'}  | ${''}          | ${''}           | ${''}        | ${'pwsh win32.ps1 7.0 production'}
+    ${'7.3'}    | ${'win32'}  | ${''}         | ${'development'} | ${''}          | ${''}           | ${''}        | ${'pwsh win32.ps1 7.3 development'}
+    ${'7.3'}    | ${'win32'}  | ${'a, b'}     | ${'none'}        | ${'a=b'}       | ${'x'}          | ${''}        | ${'pwsh win32.ps1 7.3 none install extensions set coverage driver edit php.ini'}
+  `(
+    'Test install on $os for $version with extensions=$extension_csv, ini_values=$ini_values_csv, coverage_driver=$coverage_driver, tools=$tools',
+    async ({
+      version,
+      os,
+      extension_csv,
+      ini_file,
+      ini_values_csv,
+      coverage_driver,
+      tools,
+      output
+    }) => {
+      process.env['php-version'] = version.toString();
+      process.env['RUNNER_OS'] = os;
+      process.env['extensions'] = extension_csv;
+      process.env['ini-file'] = ini_file;
+      process.env['ini-values'] = ini_values_csv;
+      process.env['coverage'] = coverage_driver;
+      process.env['tools'] = tools;
+      expect(await install.run()).toBe(output);
+    }
+  );
 });

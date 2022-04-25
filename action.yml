@@ -1,16 +1,20 @@
 name: 'Setup PHP Action'
 author: shivammathur
-description: 'Setup PHP with required extensions, php.ini configuration, code-coverage support and various tools like composer'
+description: 'GitHub Action for PHP'
 branding:
   color: 'purple'
   icon: 'play-circle'
 inputs:
   php-version:
     description: 'Setup PHP version.'
-    default: '7.4'
+    default: '8.1'
     required: true
   extensions:
     description: 'Setup PHP extensions.'
+    required: false
+  ini-file:
+    description: 'Set base ini file.'
+    default: 'production'
     required: false
   ini-values:
     description: 'Add values to php.ini.'
@@ -21,6 +25,9 @@ inputs:
   tools:
     description: 'Setup popular tools globally.'
     required: false
+outputs:
+  php-version:
+    description: 'PHP version in semver format'
 runs:
-  using: 'node12'
+  using: 'node16'
   main: 'dist/index.js'
