@@ -1,16 +1,7 @@
-# Function to setup environment for self-hosted runners.
-self_hosted_helper() {
-  if ! command -v brew >/dev/null; then
-    step_log "Setup Brew"
-    get -q -e "/tmp/install.sh" "https://raw.githubusercontent.com/Homebrew/install/master/install.sh" && /tmp/install.sh >/dev/null 2>&1
-    add_log "${tick:?}" "Brew" "Installed Homebrew"
-  fi
-}
-
 # Disable dependency extensions
 disable_dependency_extensions() {
   local extension=$1
-  formula_file="$tap_dir/$ext_tap/Formula/$extension@${version:?}.rb"
+  formula_file="${tap_dir:?}/$ext_tap/Formula/$extension@${version:?}.rb"
   if [ -e "$formula_file" ]; then
     IFS=" " read -r -a dependency_extensions <<< "$(grep -Eo "shivammathur.*@" "$formula_file" | xargs -I {} -n 1 basename '{}' | cut -d '@' -f 1 | tr '\n' ' ')"
     for dependency_extension in "${dependency_extensions[@]}"; do
@@ -33,38 +24,11 @@ disable_extension_helper() {
   echo '' | sudo tee /tmp/extdisabled/"$version"/"$extension" >/dev/null 2>&1
 }
 
-# Function to fetch a brew tap.
-fetch_brew_tap() {
-  tap=$1
-  tap_user=$(dirname "$tap")
-  tap_name=$(basename "$tap")
-  mkdir -p "$tap_dir/$tap_user"
-  get -s -n "" "https://github.com/$tap/archive/master.tar.gz" | sudo tar -xzf - -C "$tap_dir/$tap_user"
-  if [ -d "$tap_dir/$tap_user/$tap_name-master" ]; then
-    sudo mv "$tap_dir/$tap_user/$tap_name-master" "$tap_dir/$tap_user/$tap_name"
-  fi
-}
-
-# Function to add a brew tap.
-add_brew_tap() {
-  tap=$1
-  if ! [ -d "$tap_dir/$tap" ]; then
-    if [ "${runner:?}" = "self-hosted" ]; then
-      brew tap "$tap" >/dev/null 2>&1
-    else
-      fetch_brew_tap "$tap" >/dev/null 2>&1
-      if ! [ -d "$tap_dir/$tap" ]; then
-        brew tap "$tap" >/dev/null 2>&1
-      fi
-    fi
-  fi
-}
-
 # Function to get extension name from brew formula.
 get_extension_from_formula() {
   local formula=$1
   local extension
-  extension=$(grep "$formula=" "$src"/configs/brew_extensions | cut -d '=' -f 2)
+  extension=$(grep -E "^$formula=" "$src"/configs/brew_extensions | cut -d '=' -f 2)
   [[ -z "$extension" ]] && extension="$(echo "$formula" | sed -E "s/pecl_|[0-9]//g")"
   echo "$extension"
 }
@@ -76,9 +40,10 @@ copy_brew_extensions() {
   deps="$(grep -Eo 'depends_on "shivammathur[^"]+' "$formula_file" | cut -d '/' -f 3 | tr '\n' ' ')"
   IFS=' ' read -r -a deps <<< "$formula@$version $deps"
   for dependency in "${deps[@]}"; do
-    extension_file="$brew_prefix/opt/$dependency/$(get_extension_from_formula "${dependency%@*}").so"
+    extension_file="${brew_prefix:?}/opt/$dependency/$(get_extension_from_formula "${dependency%@*}").so"
     [ -e "$extension_file" ] && sudo cp "$extension_file" "$ext_dir"
   done
+  sudo find -- "$brew_prefix"/Cellar/"$formula"@"$version" -name "*.dylib" -exec cp {} "$ext_dir" \;
 }
 
 # Function to install a php extension from shivammathur/extensions tap.
@@ -92,10 +57,10 @@ add_brew_extension() {
   else
     add_brew_tap "$php_tap"
     add_brew_tap "$ext_tap"
-    sudo mv "$tap_dir"/"$ext_tap"/.github/deps/"$formula"/* "$core_repo/Formula/" 2>/dev/null || true
+    sudo mv "$tap_dir"/"$ext_tap"/.github/deps/"$formula"/* "${core_repo:?}/Formula/" 2>/dev/null || true
     update_dependencies >/dev/null 2>&1
     disable_dependency_extensions "$extension" >/dev/null 2>&1
-    brew install -f "$formula@$version" >/dev/null 2>&1
+    brew install -f "$ext_tap/$formula@$version" >/dev/null 2>&1
     copy_brew_extensions "$formula"
     add_extension_log "$extension" "Installed and enabled"
   fi
@@ -141,7 +106,7 @@ link_libraries() {
 
 # Patch brew to overwrite packages.
 patch_brew() {
-  formula_installer="$brew_repo"/Library/Homebrew/formula_installer.rb
+  formula_installer="${brew_repo:?}"/Library/Homebrew/formula_installer.rb
   code=" keg.link\(verbose: verbose\?"
   sudo sed -Ei '' "s/$code.*/$code, overwrite: true\)/" "$formula_installer"
   # shellcheck disable=SC2064
@@ -160,10 +125,13 @@ update_dependencies() {
   patch_brew
   if ! [ -e /tmp/update_dependencies ]; then
     if [ "${runner:?}" != "self-hosted" ] && [ "${ImageOS:-}" != "" ] && [ "${ImageVersion:-}" != "" ]; then
-      while read -r dependency; do
-        update_dependencies_helper "$dependency" &
-        to_wait+=($!)
-      done <"$tap_dir/$php_tap/.github/deps/${ImageOS:?}_${ImageVersion:?}"
+      deps_file="$tap_dir/$php_tap/.github/deps/${ImageOS:?}_${ImageVersion:?}"
+      if [ -e "$deps_file" ]; then
+        while read -r dependency; do
+          update_dependencies_helper "$dependency" &
+          to_wait+=($!)
+        done <"$deps_file"
+      fi
       wait "${to_wait[@]}"
     else
       git -C "$core_repo" fetch origin master && git -C "$core_repo" reset --hard origin/master
@@ -199,6 +167,7 @@ add_php() {
   existing_version=$2
   add_brew_tap "$php_tap"
   update_dependencies
+  [ "${debug:?}" = "debug" ] && php_formula="$php_formula-debug"
   if [ "$existing_version" != "false" ]; then
     ([ "$action" = "upgrade" ] && brew upgrade -f "$php_formula") || brew unlink "$php_formula"
   else
@@ -275,16 +244,10 @@ setup_php() {
 }
 
 # Variables
-version=${1:-'8.1'}
+version=${1:-'8.2'}
 ini=${2:-'production'}
 src=${0%/*}/..
 php_formula=shivammathur/php/php@"$version"
-brew_path="$(command -v brew)"
-brew_path_dir="$(dirname "$brew_path")"
-brew_prefix="$brew_path_dir"/..
-brew_repo="$brew_path_dir/$(dirname "$(readlink "$brew_path")")"/..
-tap_dir="$brew_repo"/Library/Taps
-core_repo="$tap_dir"/homebrew/homebrew-core
 scripts="$src"/scripts
 ext_tap=shivammathur/homebrew-extensions
 php_tap=shivammathur/homebrew-php
@@ -297,9 +260,11 @@ export HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK=1
 
 # shellcheck source=.
 . "${scripts:?}"/unix.sh
+. "${scripts:?}"/tools/brew.sh
 . "${scripts:?}"/tools/add_tools.sh
 . "${scripts:?}"/extensions/source.sh
 . "${scripts:?}"/extensions/add_extensions.sh
+configure_brew
 read_env
 self_hosted_setup
 setup_php

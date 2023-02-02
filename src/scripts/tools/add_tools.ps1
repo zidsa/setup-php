@@ -1,7 +1,8 @@
 # Variables
-$composer_bin = "$env:APPDATA\Composer\vendor\bin"
-$composer_json = "$env:APPDATA\Composer\composer.json"
-$composer_lock = "$env:APPDATA\Composer\composer.lock"
+$composer_home = "$env:APPDATA\Composer"
+$composer_bin = "$composer_home\vendor\bin"
+$composer_json = "$composer_home\composer.json"
+$composer_lock = "$composer_home\composer.lock"
 
 # Function to configure composer.
 Function Edit-ComposerConfig() {
@@ -24,8 +25,30 @@ Function Edit-ComposerConfig() {
   }
   Add-EnvPATH $src\configs\composer.env
   Add-Path $composer_bin
-  if (Test-Path env:COMPOSER_TOKEN) {
-    Add-Env COMPOSER_AUTH ('{"github-oauth": {"github.com": "' + $env:COMPOSER_TOKEN + '"}}')
+  Set-ComposerAuth
+}
+
+# Function to setup authentication in composer.
+Function Set-ComposerAuth() {
+  if(Test-Path env:COMPOSER_AUTH_JSON) {
+    if(Test-Json -JSON $env:COMPOSER_AUTH_JSON) {
+      Set-Content -Path $composer_home\auth.json -Value $env:COMPOSER_AUTH_JSON
+    } else {
+      Add-Log "$cross" "composer" "Could not parse COMPOSER_AUTH_JSON as valid JSON"
+    }
+  }
+  $composer_auth = @()
+  if(Test-Path env:PACKAGIST_TOKEN) {
+    $composer_auth += '"http-basic": {"repo.packagist.com": { "username": "token", "password": "' + $env:PACKAGIST_TOKEN + '"}}'
+  }
+  if(-not(Test-Path env:GITHUB_TOKEN) -and (Test-Path env:COMPOSER_TOKEN)) {
+    $env:GITHUB_TOKEN = $env:COMPOSER_TOKEN
+  }
+  if (Test-Path env:GITHUB_TOKEN) {
+    $composer_auth += '"github-oauth": {"github.com": "' + $env:GITHUB_TOKEN + '"}'
+  }
+  if($composer_auth.length) {
+    Add-Env COMPOSER_AUTH ('{' + ($composer_auth -join ',') + '}')
   }
 }
 
@@ -37,7 +60,7 @@ Function Get-ToolVersion() {
     [Parameter(Position = 1, Mandatory = $true)]
     $param
   )
-  $alp = "[a-zA-Z0-9]"
+  $alp = "[a-zA-Z0-9\.]"
   $version_regex = "[0-9]+((\.{1}$alp+)+)(\.{0})(-$alp+){0,1}"
   if($tool -eq 'composer') {
     $composer_branch_alias = Select-String -Pattern "const\sBRANCH_ALIAS_VERSION" -Path $bin_dir\composer -Raw | Select-String -Pattern $version_regex | ForEach-Object { $_.matches.Value }
@@ -67,6 +90,13 @@ Function Add-ToolsHelper() {
     Edit-ComposerConfig $bin_dir\$tool
   } elseif($tool -eq "cs2pr") {
     (Get-Content $bin_dir/cs2pr).replace('exit(9)', 'exit(0)') | Set-Content $bin_dir/cs2pr
+  } elseif($tool -eq "deployer") {
+    if(Test-Path $composer_bin\deployer.phar.bat) {
+      Copy-Item $composer_bin\deployer.phar.bat -Destination $composer_bin\dep.bat
+    }
+    if(Test-Path $composer_bin\dep.bat) {
+      Copy-Item $composer_bin\dep.bat -Destination $composer_bin\deployer.bat
+    }
   } elseif($tool -eq "phan") {
     $extensions += @('fileinfo', 'ast')
   } elseif($tool -eq "phinx") {
@@ -153,7 +183,7 @@ Function Add-Tool() {
   }
 }
 
-Function Add-ComposertoolHelper() {
+Function Add-ComposerToolHelper() {
   Param (
     [Parameter(Position = 0, Mandatory = $true)]
     [string]
@@ -171,9 +201,16 @@ Function Add-ComposertoolHelper() {
     [string]
     $composer_args
   )
+  $tool_version = $release.split(':')[1]
+  if($NULL -eq $tool_version) {
+    $tool_version = '*'
+  }
   if($scope -eq 'global') {
     if(Test-Path $composer_lock) {
       Remove-Item -Path $composer_lock -Force
+    }
+    if((composer global show $prefix$tool $tool_version -a 2>&1 | findstr '^type *: *composer-plugin') -and ($composer_args -ne '')) {
+      composer global config --no-plugins allow-plugins."$prefix$tool" true >$null 2>&1
     }
     composer global require $prefix$release $composer_args >$null 2>&1
     return composer global show $prefix$tool 2>&1 | findstr '^versions'
@@ -184,6 +221,10 @@ Function Add-ComposertoolHelper() {
     $unix_scoped_dir = $scoped_dir.replace('\', '/')
     if(-not(Test-Path $scoped_dir)) {
       New-Item -ItemType Directory -Force -Path $scoped_dir > $null 2>&1
+      Set-Content -Path $scoped_dir\composer.json -Value "{}"
+      if((composer show $prefix$tool $tool_version -d $unix_scoped_dir -a 2>&1 | findstr '^type *: *composer-plugin') -and ($composer_args -ne '')) {
+        composer config -d $unix_scoped_dir --no-plugins allow-plugins."$prefix$tool" true >$null 2>&1
+      }
       composer require $prefix$release -d $unix_scoped_dir $composer_args >$null 2>&1
     }
     [System.Environment]::SetEnvironmentVariable(($tool.replace('-', '_') + '_bin'), "$scoped_dir\vendor\bin")
@@ -193,7 +234,7 @@ Function Add-ComposertoolHelper() {
 }
 
 # Function to setup a tool using composer.
-Function Add-Composertool() {
+Function Add-ComposerTool() {
   Param (
     [Parameter(Position = 0, Mandatory = $true)]
     [ValidateNotNull()]
@@ -216,6 +257,7 @@ Function Add-Composertool() {
     [string]
     $scope
   )
+  $composer_args = ""
   if($composer_version.split('.')[0] -ne "1") {
     $composer_args = "--ignore-platform-req=ext-*"
     if($tool -match "prestissimo|composer-prefetcher") {
@@ -225,7 +267,7 @@ Function Add-Composertool() {
     }
   }
   Enable-PhpExtension -Extension curl, mbstring, openssl -Path $php_dir
-  $log = Add-ComposertoolHelper $tool $release $prefix $scope $composer_args
+  $log = Add-ComposerToolHelper $tool $release $prefix $scope $composer_args
   if(Test-Path $composer_bin\composer) {
     Copy-Item -Path "$bin_dir\composer" -Destination "$composer_bin\composer" -Force
   }

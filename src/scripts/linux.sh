@@ -2,7 +2,7 @@
 add_sudo() {
   if ! command -v sudo >/dev/null; then
     check_package sudo || apt-get update
-    apt-get install -y sudo
+    apt-get install -y sudo || (apt-get update && apt-get install -y sudo)
   fi
 }
 
@@ -75,9 +75,10 @@ check_package() {
 # Helper function to add an extension.
 add_extension_helper() {
   local extension=$1
-  package=php"$version"-"$extension"
+  packages=(php"$version"-"$extension")
   add_ppa ondrej/php >/dev/null 2>&1 || update_ppa ondrej/php
-  (check_package "$package" && install_packages "$package") || pecl_install "$extension"
+  [ "${debug:?}" = "debug" ] && check_package php"$version"-"$extension"-dbgsym && packages+=(php"$version"-"$extension"-dbgsym)
+  (check_package "${packages[0]}" && install_packages "${packages[@]}") || pecl_install "$extension"
   add_extension_log "$extension" "Installed and enabled"
   sudo chmod 777 "${ini_file[@]}"
 }
@@ -88,14 +89,14 @@ add_devtools() {
   if ! command -v "$tool$version" >/dev/null; then
     install_packages "php$version-dev"
   fi
-  add_extension xml extension >/dev/null 2>&1
   switch_version "phpize" "php-config"
+  add_extension xml extension >/dev/null 2>&1
   add_log "${tick:?}" "$tool" "Added $tool $semver"
 }
 
 # Function to setup the nightly build from shivammathur/php-builder
 setup_nightly() {
-  run_script "php-builder" "${runner:?}" "$version"
+  run_script "php-builder" "${runner:?}" "$version" "${debug:?}" ${ts:?}
 }
 
 # Function to setup PHP 5.3, PHP 5.4 and PHP 5.5.
@@ -133,15 +134,22 @@ switch_version() {
   wait "${to_wait[@]}"
 }
 
+# Function to get packages to install
+get_php_packages() {
+  sed "s/[^ ]*/php$version-&/g" "$src"/configs/php_packages | tr '\n' ' '
+  if [ "${debug:?}" = "debug" ]; then
+    sed "s/[^ ]*/php$version-&-dbgsym/g" "$src"/configs/php_debug_packages | tr '\n' ' '
+  fi
+}
+
 # Function to install packaged PHP
 add_packaged_php() {
   if [ "$runner" = "self-hosted" ] || [ "${use_package_cache:-true}" = "false" ]; then
     add_ppa ondrej/php >/dev/null 2>&1 || update_ppa ondrej/php
-    IFS=' ' read -r -a packages <<<"$(sed "s/[^ ]*/php$version-&/g" "$src"/configs/php_packages | tr '\n' ' ')"
+    IFS=' ' read -r -a packages <<<"$(get_php_packages)"
     install_packages "${packages[@]}"
-    add_pecl
   else
-    run_script "php-ubuntu" "$version"
+    run_script "php-ubuntu" "$version" "${debug:?}"
   fi
 }
 
@@ -159,13 +167,14 @@ update_php() {
 
 # Function to install PHP.
 add_php() {
-  if [[ "$version" =~ ${nightly_versions:?} ]]; then
+  if [[ "$version" =~ ${nightly_versions:?} ]] || [[ "${ts:?}" = "zts" ]]; then
     setup_nightly
   elif [[ "$version" =~ ${old_versions:?} ]]; then
     setup_old_versions
   else
     add_packaged_php
     switch_version >/dev/null 2>&1
+    add_pecl
   fi
   status="Installed"
 }
@@ -258,7 +267,7 @@ setup_php() {
 }
 
 # Variables
-version=${1:-'8.1'}
+version=${1:-'8.2'}
 ini=${2:-'production'}
 src=${0%/*}/..
 debconf_fix="DEBIAN_FRONTEND=noninteractive"

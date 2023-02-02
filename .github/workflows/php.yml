@@ -17,6 +17,9 @@ on:
     paths-ignore:
       - '**.md'
       - 'examples/**'
+permissions:
+  contents: read
+
 jobs:
   run:
     name: Run
@@ -24,10 +27,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        operating-system: [ubuntu-20.04, ubuntu-18.04, windows-2019, macos-latest]
-        php-versions: ['5.3', '5.4', '5.5', '5.6', '7.0', '7.1', '7.2', '7.3', '7.4', '8.0', '8.1', '8.2']
+        operating-system: [ubuntu-22.04, ubuntu-20.04, ubuntu-18.04, windows-2019, macos-latest]
+        php-versions: ['5.3', '5.4', '5.5', '5.6', '7.0', '7.1', '7.2', '7.3', '7.4', '8.0', '8.1', '8.2', '8.3']
     env:
-      extensions: xml, opcache, xdebug, pcov
+      extensions: xml, opcache, xdebug, pcov, gd
       key: cache-v5
     steps:
       - name: Checkout
@@ -67,6 +70,7 @@ jobs:
       - name: Testing Extensions
         run: |
           php -m
+          php -r "if(! extension_loaded('gd')) {throw new Exception('gd not found');}"
           php -r "if(! extension_loaded('xml')) {throw new Exception('xml not found');}"
           php -r "if(! extension_loaded('Xdebug')) {throw new Exception('Xdebug not found');}"
           php -r "if(phpversion()>=7.1 && ! extension_loaded('pcov')) {throw new Exception('PCOV not found');}"

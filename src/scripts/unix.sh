@@ -4,7 +4,7 @@ export cross="✗"
 export curl_opts=(-sL)
 export old_versions="5.[3-5]"
 export jit_versions="8.[0-9]"
-export nightly_versions="8.[2-9]"
+export nightly_versions="8.[3-9]"
 export xdebug3_versions="7.[2-4]|8.[0-9]"
 export latest="releases/latest/download"
 export github="https://github.com/shivammathur"
@@ -43,13 +43,15 @@ set_output() {
   name=$1
   value=$2
   if [ "${GITHUB_ACTIONS}" = "true" ]; then
-    echo "::set-output name=${name}::${value}"
+    echo "${name}=${value}" | tee -a "$GITHUB_OUTPUT" >/dev/null 2>&1
   fi
 }
 
 # Function to read env inputs.
 read_env() {
   update="${update:-${UPDATE:-false}}"
+  [ "${debug:-${DEBUG:-false}}" = "true" ] && debug=debug && update=true || debug=release
+  [ "${phpts:-${PHPTS:-nts}}" = "ts" ] && ts=zts && update=true || ts=nts
   fail_fast="${fail_fast:-${FAIL_FAST:-false}}"
   [[ -z "${ImageOS}" && -z "${ImageVersion}" ]] && _runner=self-hosted || _runner=github
   runner="${runner:-${RUNNER:-$_runner}}"
@@ -58,6 +60,16 @@ read_env() {
     fail_fast=true
     add_log "$cross" "Runner" "Runner set as github in self-hosted environment"
   fi
+
+  # Set Update to true if the ubuntu github image does not have PHP PPA.
+  if [[ "$runner" = "github" && "${ImageOS}" =~ ubuntu.* ]]; then
+    check_ppa ondrej/php || update=true
+  fi
+
+  export fail_fast
+  export runner
+  export update
+  export ts
 }
 
 # Function to download a file using cURL.
@@ -151,6 +163,7 @@ self_hosted_setup() {
       exit 1
     else
       self_hosted_helper >/dev/null 2>&1
+      add_env RUNNER_TOOL_CACHE /tmp
     fi
   fi
 }
@@ -159,10 +172,10 @@ self_hosted_setup() {
 configure_php() {
   add_php_config
   ini_config_dir="${src:?}"/configs/ini
-  ini_files=("$ini_config_dir"/php.ini)
-  [[ "$version" =~ $jit_versions ]] && ini_files+=("$ini_config_dir"/jit.ini)
-  [[ "$version" =~ $xdebug3_versions ]] && ini_files+=("$ini_config_dir"/xdebug.ini)
-  cat "${ini_files[@]}" | sudo tee -a "${pecl_file:-${ini_file[@]}}" >/dev/null 2>&1
+  ini_config_files=("$ini_config_dir"/php.ini)
+  [[ "$version" =~ $jit_versions ]] && ini_config_files+=("$ini_config_dir"/jit.ini)
+  [[ "$version" =~ $xdebug3_versions ]] && ini_config_files+=("$ini_config_dir"/xdebug.ini)
+  cat "${ini_config_files[@]}" | sudo tee -a "${ini_file[@]:?}" >/dev/null 2>&1
 }
 
 # Function to get PHP version in semver format.

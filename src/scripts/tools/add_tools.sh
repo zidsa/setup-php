@@ -9,7 +9,7 @@ export composer_lock="$composer_home/composer.lock"
 get_tool_version() {
   tool=$1
   param=$2
-  alp="[a-zA-Z0-9]"
+  alp="[a-zA-Z0-9\.]"
   version_regex="[0-9]+((\.{1}$alp+)+)(\.{0})(-$alp+){0,1}"
   if [ "$tool" = "composer" ]; then
     composer_alias_version="$(grep -Ea "const\sBRANCH_ALIAS_VERSION" "$tool_path_dir/composer" | grep -Eo "$version_regex")"
@@ -44,8 +44,27 @@ configure_composer() {
   fi
   add_env_path "${src:?}"/configs/composer.env
   add_path "$composer_bin"
-  if [ -n "$COMPOSER_TOKEN" ]; then
-    add_env COMPOSER_AUTH '{"github-oauth": {"github.com": "'"$COMPOSER_TOKEN"'"}}'
+  set_composer_auth
+}
+
+# Function to setup authentication in composer.
+set_composer_auth() {
+  if [ -n "$COMPOSER_AUTH_JSON" ]; then
+    if php -r "json_decode('$COMPOSER_AUTH_JSON'); if(json_last_error() !== JSON_ERROR_NONE) { throw new Exception('invalid json'); }"; then
+      echo "$COMPOSER_AUTH_JSON" | tee "$composer_home/auth.json" >/dev/null
+    else
+      add_log "${cross:?}" "composer" "Could not parse COMPOSER_AUTH_JSON as valid JSON"
+    fi
+  fi
+  composer_auth=()
+  if [ -n "$PACKAGIST_TOKEN" ]; then
+    composer_auth+=( '"http-basic": {"repo.packagist.com": { "username": "token", "password": "'"$PACKAGIST_TOKEN"'"}}' )
+  fi
+  if [ -n "${GITHUB_TOKEN:-$COMPOSER_TOKEN}" ]; then
+    composer_auth+=( '"github-oauth": {"github.com": "'"${GITHUB_TOKEN:-$COMPOSER_TOKEN}"'"}' )
+  fi
+  if ((${#composer_auth[@]})); then
+    add_env COMPOSER_AUTH "{$(IFS=$','; echo "${composer_auth[*]}")}"
   fi
 }
 
@@ -61,6 +80,13 @@ add_tools_helper() {
   elif [ "$tool" = "cs2pr" ]; then
     sudo sed -i 's/\r$//; s/exit(9)/exit(0)/' "$tool_path" 2>/dev/null ||
     sudo sed -i '' 's/\r$//; s/exit(9)/exit(0)/' "$tool_path"
+  elif [ "$tool" = "deployer" ]; then
+    if [ -e "$composer_bin"/deployer.phar ]; then
+      sudo ln -s "$composer_bin"/deployer.phar "$composer_bin"/dep
+    fi
+    if [ -e "$composer_bin"/dep ]; then
+      sudo ln -s "$composer_bin"/dep "$composer_bin"/deployer
+    fi
   elif [ "$tool" = "phan" ]; then
     extensions+=(fileinfo ast)
   elif [ "$tool" = "phinx" ]; then
@@ -127,21 +153,29 @@ add_tool() {
 }
 
 # Function to setup a tool using composer in a different scope.
-add_composertool_helper() {
+add_composer_tool_helper() {
   tool=$1
   release=$2
   prefix=$3
   scope=$4
   composer_args=$5
   enable_extensions curl mbstring openssl
+  tool_version=${release##*:}; [ "$tool_version" = "$tool" ] && tool_version="*"
   if [ "$scope" = "global" ]; then
     sudo rm -f "$composer_lock" >/dev/null 2>&1 || true
+    if composer global show "$prefix$tool" "$tool_version" -a 2>&1 | grep -qE '^type *: *composer-plugin' && [ -n "$composer_args" ]; then
+      composer global config --no-plugins allow-plugins."$prefix$tool" true >/dev/null 2>&1
+    fi
     composer global require "$prefix$release" "$composer_args" >/dev/null 2>&1
     composer global show "$prefix$tool" 2>&1 | grep -E ^versions | sudo tee /tmp/composer.log >/dev/null 2>&1
   else
     scoped_dir="$composer_bin/_tools/$tool-$(echo -n "$release" | shasum -a 256 | cut -d ' ' -f 1)"
     if ! [ -d "$scoped_dir" ]; then
       mkdir -p "$scoped_dir"
+      echo '{}' | tee "$scoped_dir/composer.json" >/dev/null
+      if composer show "$prefix$tool" "$tool_version" -d "$scoped_dir" -a 2>&1 | grep -qE '^type *: *composer-plugin' && [ -n "$composer_args" ]; then
+        composer config -d "$scoped_dir" --no-plugins allow-plugins."$prefix$tool" true >/dev/null 2>&1
+      fi
       composer require "$prefix$release" -d "$scoped_dir" "$composer_args" >/dev/null 2>&1
       composer show "$prefix$tool" -d "$scoped_dir" 2>&1 | grep -E ^versions | sudo tee /tmp/composer.log >/dev/null 2>&1
     fi
@@ -150,11 +184,12 @@ add_composertool_helper() {
 }
 
 # Function to setup a tool using composer.
-add_composertool() {
+add_composer_tool() {
   tool=$1
   release=$2
   prefix=$3
   scope=$4
+  composer_args=
   composer_major_version=$(cut -d'.' -f 1 /tmp/composer_version)
   if [ "$composer_major_version" != "1" ]; then
     composer_args="--ignore-platform-req=ext-*"
@@ -164,7 +199,7 @@ add_composertool() {
       return
     fi
   fi
-  add_composertool_helper "$tool" "$release" "$prefix" "$scope" "$composer_args"
+  add_composer_tool_helper "$tool" "$release" "$prefix" "$scope" "$composer_args"
   tool_version=$(get_tool_version cat /tmp/composer.log)
   ([ -s /tmp/composer.log ] && add_log "$tick" "$tool" "Added $tool $tool_version"
   ) || add_log "$cross" "$tool" "Could not setup $tool"

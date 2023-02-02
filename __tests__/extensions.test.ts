@@ -25,6 +25,7 @@ describe('Extension tests', () => {
     ${'sqlsrv-1.2.3preview1'}                    | ${'7.4'} | ${'Add-Extension sqlsrv devel 1.2.3'}
     ${'Xdebug'}                                  | ${'7.4'} | ${'Add-Extension xdebug'}
     ${'xdebug2'}                                 | ${'7.2'} | ${'Add-Extension xdebug stable 2.9.8'}
+    ${'zephir_parser'}                           | ${'7.2'} | ${'Add-ZephirParser zephir_parser'}
   `(
     'checking addExtensionOnWindows for extension $extension on version $version',
     async ({extension, version, output}) => {
@@ -59,11 +60,14 @@ describe('Extension tests', () => {
     ${'pdo_sqlsrv'}                              | ${'7.4'} | ${'add_sqlsrv pdo_sqlsrv'}
     ${'pecl_http'}                               | ${'7.3'} | ${'add_http'}
     ${'phalcon3'}                                | ${'7.3'} | ${'add_phalcon phalcon3'}
+    ${'relay'}                                   | ${'7.4'} | ${'add_relay relay'}
+    ${'relay-v1.2.3'}                            | ${'7.4'} | ${'add_relay relay-v1.2.3'}
     ${'sqlite'}                                  | ${'7.4'} | ${'add_extension sqlite3'}
     ${'sqlsrv-1.2.3-beta1'}                      | ${'7.4'} | ${'add_pecl_extension sqlsrv 1.2.3beta1 extension'}
     ${'Xdebug'}                                  | ${'7.4'} | ${'add_extension xdebug'}
     ${'xdebug-alpha'}                            | ${'7.4'} | ${'add_unstable_extension xdebug alpha zend_extension'}
     ${'xdebug2'}                                 | ${'7.2'} | ${'add_pecl_extension xdebug 2.9.8 zend_extension'}
+    ${'zephir_parser-1.2.3'}                     | ${'7.2'} | ${'add_zephir_parser zephir_parser-1.2.3'}
   `(
     'checking addExtensionOnLinux for extension $extension on version $version',
     async ({extension, version, output}) => {
@@ -92,8 +96,9 @@ describe('Extension tests', () => {
     ${'pcov'}                                    | ${'5.6'} | ${'add_log "$cross" "pcov" "pcov is not supported on PHP 5.6"'}
     ${'pdo_oci'}                                 | ${'7.3'} | ${'add_oci pdo_oci'}
     ${'pecl_http'}                               | ${'7.3'} | ${'add_http'}
+    ${'relay-1.2.3'}                             | ${'7.4'} | ${'add_relay relay-1.2.3'}
     ${'sqlite'}                                  | ${'7.2'} | ${'add_extension sqlite3'}
-    ${'sqlsrv'}                                  | ${'7.3'} | ${'add_sqlsrv sqlsrv'}
+    ${'zephir_parser-v1.2.3'}                    | ${'7.2'} | ${'add_zephir_parser zephir_parser-v1.2.3'}
   `(
     'checking addExtensionOnDarwin for extension $extension on version $version',
     async ({extension, version, output}) => {
@@ -112,12 +117,13 @@ describe('Extension tests', () => {
       const [formula, extension]: string[] = line.split('=');
       const prefix: string =
         extension == 'xdebug' ? 'zend_extension' : 'extension';
+      const ext_name = extension.replace(/\d+|(pdo|pecl)[_-]/, '');
       const output: string = fs.existsSync(
-        `src/scripts/extensions/${extension}.sh`
+        `src/scripts/extensions/${ext_name}.sh`
       )
-        ? `add_${extension}`
+        ? `add_${ext_name}`
         : `add_brew_extension ${formula} ${prefix}`;
-      return [formula, '7.3', output];
+      return [formula, formula === 'phalcon3' ? '7.3' : '7.4', output];
     });
 
   it.each(data)(

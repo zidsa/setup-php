@@ -109,6 +109,9 @@ describe('Utils tests', () => {
     expect(
       await utils.CSVArray('a=E_ALL, b=E_ALL & ~ E_ALL, c="E_ALL", d=\'E_ALL\'')
     ).toEqual(['a=E_ALL', 'b=E_ALL & ~ E_ALL', 'c=E_ALL', 'd=E_ALL']);
+    expect(
+      await utils.CSVArray('a="b=c;d=e", b=\'c=d,e\', c="g=h,i=j", d=g=h, a===')
+    ).toEqual(["a='b=c;d=e'", "b='c=d,e'", "c='g=h,i=j'", "d='g=h'", "a='=='"]);
     expect(await utils.CSVArray('')).toEqual([]);
     expect(await utils.CSVArray(' ')).toEqual([]);
   });
@@ -190,6 +193,7 @@ describe('Utils tests', () => {
     expect(await utils.getCommand('linux', 'tool')).toBe('add_tool ');
     expect(await utils.getCommand('darwin', 'tool')).toBe('add_tool ');
     expect(await utils.getCommand('win32', 'tool')).toBe('Add-Tool ');
+    expect(await utils.getCommand('win32', 'tool_name')).toBe('Add-ToolName ');
     expect(await utils.getCommand('openbsd', 'tool')).toContain(
       'Platform openbsd is not supported'
     );
@@ -255,5 +259,14 @@ describe('Utils tests', () => {
     ).toContain(
       '\nadd_extension_from_source ext https://sub.domain.XN--tld org repo release extension'
     );
+  });
+
+  it('checking setVariable', async () => {
+    let script: string = await utils.setVariable('var', 'command', 'linux');
+    expect(script).toEqual('\nvar="$(command)"\n');
+    script = await utils.setVariable('var', 'command', 'darwin');
+    expect(script).toEqual('\nvar="$(command)"\n');
+    script = await utils.setVariable('var', 'command', 'win32');
+    expect(script).toEqual('\n$var = command\n');
   });
 });

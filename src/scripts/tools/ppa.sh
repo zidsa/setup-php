@@ -140,6 +140,20 @@ add_list() {
   return 0;
 }
 
+# Function to check if a PPA exists
+check_ppa() {
+  ppa=$1
+  ppa_url=${2:-"$lp_ppa/$ppa/ubuntu"}
+  package_dist=${3:-"$VERSION_CODENAME"}
+  branches=${4:-main}
+  ppa_search="deb .*$ppa_url $package_dist .*$branches"
+  if check_lists "$ppa" "$ppa_search"; then
+    return 0;
+  else
+    return 1;
+  fi
+}
+
 # Function to remove a PPA.
 remove_list() {
   ppa=${1-ondrej/php}
@@ -153,8 +167,10 @@ add_ppa() {
   set_base_version
   ppa=${1:-ondrej/php}
   if [[ "$ID" = "ubuntu" || "$ID_LIKE" =~ ubuntu ]] && [[ "$ppa" =~ "ondrej/" ]]; then
+    [ "${debug:?}" = "debug" ] && add_list "$ppa" "$lp_ppa/$ppa/ubuntu" "$lp_ppa/$ppa/ubuntu" "$VERSION_CODENAME" "main/debug"
     add_list "$ppa"
   elif [[ "$ID" = "debian" || "$ID_LIKE" =~ debian ]] && [[ "$ppa" =~ "ondrej/" ]]; then
+    [ "${debug:?}" = "debug" ] && add_list "$ppa" "$sury"/"${ppa##*/}"/ "$sury"/"${ppa##*/}"/apt.gpg "$VERSION_CODENAME" "main/debug"
     add_list "$ppa" "$sury"/"${ppa##*/}"/ "$sury"/"${ppa##*/}"/apt.gpg
   else
     add_list "$ppa"

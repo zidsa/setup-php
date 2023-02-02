@@ -21,8 +21,12 @@ interface IRef {
 export async function getSemverVersion(data: RS): Promise<string> {
   const search: string = data['version_prefix'] + data['version'];
   const url = `https://api.github.com/repos/${data['repository']}/git/matching-refs/tags%2F${search}.`;
-  const token: string = await utils.readEnv('COMPOSER_TOKEN');
-  const response: RS = await fetch.fetch(url, token);
+  let github_token: string = await utils.readEnv('GITHUB_TOKEN');
+  const composer_token: string = await utils.readEnv('COMPOSER_TOKEN');
+  if (composer_token && !github_token) {
+    github_token = composer_token;
+  }
+  const response: RS = await fetch.fetch(url, github_token);
   if (response.error || response.data === '[]') {
     data['error'] = response.error ?? `No version found with prefix ${search}.`;
     return data['version'];
@@ -197,7 +201,7 @@ export async function addArchive(data: RS): Promise<string> {
  * @param data
  */
 export async function addPackage(data: RS): Promise<string> {
-  const command = await utils.getCommand(data['os'], 'composertool');
+  const command = await utils.getCommand(data['os'], 'composer_tool');
   const parts: string[] = data['repository'].split('/');
   const args: string = await utils.joins(
     parts[1],
@@ -214,11 +218,12 @@ export async function addPackage(data: RS): Promise<string> {
  * @param data
  */
 export async function addBlackfirePlayer(data: RS): Promise<string> {
-  if (
-    /5\.[5-6]|7\.0/.test(data['php_version']) &&
-    data['version'] == 'latest'
-  ) {
-    data['version'] = '1.9.3';
+  if (data['version'] == 'latest') {
+    if (/5\.[5-6]|7\.0/.test(data['php_version'])) {
+      data['version'] = '1.9.3';
+    } else if (/7\.[1-4]|8\.0/.test(data['php_version'])) {
+      data['version'] = '1.22.0';
+    }
   }
   data['url'] = await getPharUrl(data);
   return addArchive(data);
@@ -230,24 +235,34 @@ export async function addBlackfirePlayer(data: RS): Promise<string> {
  * @param data
  */
 export async function addComposer(data: RS): Promise<string> {
+  const channel = data['version'].replace('latest', 'stable');
   const github = data['github'];
   const getcomposer = data['domain'];
-  let cache_url = `${github}/shivammathur/composer-cache/releases/latest/download/composer-${
-    data['php_version']
-  }-${data['version'].replace('latest', 'stable')}.phar`;
+  const cds = 'https://dl.cloudsmith.io';
+  const filename = `composer-${data['php_version']}-${channel}.phar`;
+  const releases_url = `${github}/shivammathur/composer-cache/releases/latest/download/${filename}`;
+  const cds_url = `${cds}/public/shivammathur/composer-cache/raw/files/${filename}`;
+  const lts_url = `${getcomposer}/download/latest-2.2.x/composer.phar`;
+  const is_lts = /^5\.[3-6]$|^7\.[0-1]$/.test(data['php_version']);
+  const version_source_url = `${getcomposer}/composer-${channel}.phar`;
+  let cache_url = `${releases_url},${cds_url}`;
   let source_url = `${getcomposer}/composer.phar`;
   switch (true) {
-    case /^snapshot$/.test(data['version']):
+    case /^snapshot$/.test(channel):
+      source_url = is_lts ? lts_url : source_url;
       break;
-    case /^preview$|^[1-2]$/.test(data['version']):
-      source_url = `${getcomposer}/composer-${data['version']}.phar`;
+    case /^preview$|^2$/.test(channel):
+      source_url = is_lts ? lts_url : version_source_url;
+      break;
+    case /^1$/.test(channel):
+      source_url = version_source_url;
       break;
     case /^\d+\.\d+\.\d+[\w-]*$/.test(data['version']):
       cache_url = `${github}/${data['repository']}/releases/download/${data['version']}/composer.phar`;
-      source_url = `${getcomposer}/composer-${data['version']}.phar`;
+      source_url = version_source_url;
       break;
     default:
-      source_url = `${getcomposer}/composer-stable.phar`;
+      source_url = is_lts ? lts_url : version_source_url;
   }
   const use_cache: boolean = (await utils.readEnv('NO_TOOLS_CACHE')) !== 'true';
   data['url'] = use_cache ? `${cache_url},${source_url}` : source_url;
@@ -264,8 +279,25 @@ export async function addDeployer(data: RS): Promise<string> {
   if (data['version'] === 'latest') {
     data['url'] = data['domain'] + '/deployer.phar';
   } else {
-    data['url'] =
-      data['domain'] + '/releases/v' + data['version'] + '/deployer.phar';
+    const manifest: RS = await fetch.fetch(
+      'https://deployer.org/manifest.json'
+    );
+    const version_data: RSRS = JSON.parse(manifest.data);
+    const version_key: string | undefined = Object.keys(version_data).find(
+      (key: string) => {
+        return version_data[key]['version'] === data['version'];
+      }
+    );
+    if (version_key) {
+      data['url'] = version_data[version_key]['url'];
+    } else {
+      return await utils.addLog(
+        '$cross',
+        'deployer',
+        'Version missing in deployer manifest',
+        data['os']
+      );
+    }
   }
   return await addArchive(data);
 }

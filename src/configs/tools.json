@@ -7,6 +7,14 @@
     "version_prefix": "",
     "version_parameter": "-V"
   },
+  "composer-unused": {
+    "type": "phar",
+    "repository": "composer-unused/composer-unused",
+    "extension": ".phar",
+    "domain": "https://github.com",
+    "version_prefix": "",
+    "version_parameter": "-V"
+  },
   "composer-normalize": {
     "type": "phar",
     "repository": "ergebnis/composer-normalize",
@@ -105,6 +113,14 @@
     "version_prefix": "",
     "version_parameter": "-V"
   },
+  "pint": {
+    "type": "phar",
+    "repository": "laravel/pint",
+    "extension": ".phar",
+    "domain": "https://github.com",
+    "version_prefix": "v",
+    "version_parameter": "-V"
+  },
   "psalm": {
     "type": "phar",
     "repository": "vimeo/psalm",
@@ -132,11 +148,6 @@
   "composer-require-checker": {
     "type": "composer",
     "repository": "maglnet/composer-require-checker",
-    "scope": "scoped"
-  },
-  "composer-unused": {
-    "type": "composer",
-    "repository": "icanhazstring/composer-unused",
     "scope": "scoped"
   },
   "flex": {
@@ -174,6 +185,11 @@
     "type": "composer",
     "alias": "vapor",
     "repository": "laravel/vapor-cli",
+    "scope": "scoped"
+  },
+  "rector": {
+    "type": "composer",
+    "repository": "rector/rector",
     "scope": "scoped"
   },
   "blackfire": {

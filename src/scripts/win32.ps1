@@ -3,7 +3,7 @@ param (
   [ValidateNotNull()]
   [ValidateLength(1, [int]::MaxValue)]
   [string]
-  $version = '8.1',
+  $version = '8.2',
   [Parameter(Position = 1, Mandatory = $true)]
   [ValidateNotNull()]
   [ValidateLength(1, [int]::MaxValue)]
@@ -43,7 +43,7 @@ Function Set-Output() {
     $value
   )
   if ($env:GITHUB_ACTIONS -eq 'true') {
-    Write-Output "::set-output name=$output::$value"
+    Add-Content "$output=$value" -Path $env:GITHUB_OUTPUT -Encoding utf8
   }
 }
 
@@ -88,6 +88,7 @@ Function Add-Path {
   }
   if ($env:GITHUB_PATH) {
     Add-Content $PathItem -Path $env:GITHUB_PATH -Encoding utf8
+    $env:PATH += "$PathItem;"
   } else {
     $newPath = (Get-ItemProperty -Path 'hkcu:\Environment' -Name PATH).Path.replace("$PathItem;", '')
     $newPath = $PathItem + ';' + $newPath
@@ -217,15 +218,41 @@ Function Add-PhpConfig {
 # Function to get PHP from GitHub releases cache
 Function Set-PhpCache {
   try {
-    $release = Invoke-RestMethod https://api.github.com/repos/shivammathur/php-builder-windows/releases/tags/php$version
-    $asset = $release.assets | ForEach-Object {
-      if($_.name -match "php-$version.[0-9]+$env:PHPTS-Win32-.*-$arch.zip") {
-        return $_.name
+    try {
+      $release = Invoke-RestMethod https://api.github.com/repos/shivammathur/php-builder-windows/releases/tags/php$version
+      $asset = $release.assets | ForEach-Object {
+        if($_.name -match "php-$version.[0-9]+$env:PHPTS-Win32-.*-$arch.zip") {
+          return $_.name
+        }
+      }
+      if($null -eq $asset) {
+        throw "Asset not found"
+      }
+    } catch {
+      $release = Invoke-WebRequest $php_builder/releases/expanded_assets/php$version
+      $asset = $release.links.href | ForEach-Object {
+        if($_ -match "php-$version.[0-9]+$env:PHPTS-Win32-.*-$arch.zip") {
+          return $_.split('/')[-1]
+        }
       }
     }
     Invoke-WebRequest -UseBasicParsing -Uri $php_builder/releases/download/php$version/$asset -OutFile $php_dir\$asset
     Set-PhpDownloadCache -Path $php_dir CurrentUser
   } catch { }
+}
+
+# Function to add debug symbols to PHP.
+Function Add-DebugSymbols {
+  $release = Invoke-RestMethod https://api.github.com/repos/shivammathur/php-builder-windows/releases/tags/php$version
+  $dev = if ($version -match $nightly_versions) { '-dev' } else { '' }
+  $asset = $release.assets | ForEach-Object {
+    if($_.name -match "php-debug-pack-$version.[0-9]+$dev$env:PHPTS-Win32-.*-$arch.zip") {
+      return $_.name
+    }
+  }
+  Invoke-WebRequest -UseBasicParsing -Uri $php_builder/releases/download/php$version/$asset -OutFile $php_dir\$asset
+  Expand-Archive -Path $php_dir\$asset -DestinationPath $php_dir -Force
+  Get-ChildItem -Path $php_dir -Filter php_*.pdb | Move-Item -Destination $ext_dir
 }
 
 # Function to install nightly version of PHP
@@ -295,6 +322,7 @@ if(-not($env:ImageOS) -and -not($env:ImageVersion)) {
   New-Item $php_dir -Type Directory -Force > $null 2>&1
   Add-Path -PathItem $php_dir
   setx PHPROOT $php_dir >$null 2>&1
+  Add-Env -EnvName RUNNER_TOOL_CACHE -EnvValue $env:TEMP
 } else {
   $current_profile = "$PSHOME\Profile.ps1"
   if(-not(Test-Path -LiteralPath $current_profile)) {
@@ -347,6 +375,10 @@ if ($null -eq $installed -or -not("$($installed.Version).".StartsWith(($version 
     $status = "Found"
   }
   Add-PhpConfig
+}
+
+if($env:DEBUG -eq 'true') {
+  Add-DebugSymbols
 }
 
 $installed = Get-Php -Path $php_dir

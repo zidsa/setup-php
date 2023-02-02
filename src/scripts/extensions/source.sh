@@ -13,7 +13,7 @@ parse_args() {
 # Function to parse configure options for pecl
 # Make sure we have all options in name="value" form i.e XML properties.
 parse_pecl_configure_options() {
-  configure_opts=$(echo "$1" | sed -r -e "s#['\"]|--##g")
+  configure_opts=$(echo "$1" | sed -E -e "s#['\"]|--##g")
   IFS=' ' read -r -a opts_array <<< "$configure_opts"
   output_opts=()
   for opt in "${opts_array[@]}"; do
@@ -146,6 +146,7 @@ add_extension_from_source() {
       add_log "${cross:?}" "$source" "$source does not have a PHP extension"
     else
       [[ -n "${libraries// }" ]] && run_group "add_libs $libraries" "add libraries"
+      [ "${debug:?}" = "debug" ] && suffix_opts="$suffix_opts --enable-debug"
       patch_extension "$extension" >/dev/null 2>&1
       run_group "phpize" "phpize"
       run_group "sudo $prefix_opts ./configure $suffix_opts $opts" "configure"

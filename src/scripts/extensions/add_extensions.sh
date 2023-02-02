@@ -30,7 +30,8 @@ enable_cache_extension_dependencies() {
     cache_dir=$(find /tmp/extcache -maxdepth 1 -type d -regex ".*$1[0-9]*")
     if [[ -n "$cache_dir" ]]; then
       IFS=" " read -r -a deps <<<"$(find "$cache_dir" -maxdepth 1 -type f -name "*" -exec basename {} \; | tr '\n' ' ')"
-      if [[ -n "${deps[*]}" ]] && php "${deps[@]/#/-d ${2}=}" -d "${2}=$1" -m 2>/dev/null | grep -i -q "$1"; then
+      IFS="#" read -r -a deps_enable <<<"$(printf -- "-d ${2}=%s.so#" "${deps[@]}")"
+      if [[ -n "${deps[*]}" ]] && php "${deps_enable[@]}" -d "${2}=$1.so" -m 2>/dev/null | grep -i -q "$1"; then
         for ext in "${deps[@]}"; do
           sudo rm -rf /tmp/extcache/"$ext"
           enable_extension "$ext" "$2"
@@ -119,6 +120,7 @@ disable_all_shared() {
 
 # Function to configure PECL.
 configure_pecl() {
+  [ -z "${pecl_file:-${ini_file[@]}}" ] && return
   if ! [ -e /tmp/pecl_config ]; then
     for script in pear pecl; do
       sudo "$script" config-set php_ini "${pecl_file:-${ini_file[@]}}"
@@ -143,13 +145,18 @@ add_extension() {
 # Function to get the PECL version of an extension.
 get_pecl_version() {
   local extension=$1
-  stability="$(echo "$2" | grep -m 1 -Eio "(stable|alpha|beta|rc|snapshot|preview)")"
+  states=("stable" "rc" "preview" "beta" "alpha" "snapshot")
+  stability="$(echo "$2" | grep -m 1 -Eio "($(IFS='|' ; echo "${states[*]}"))")"
+  IFS=' ' read -r -a states <<< "$(echo "${states[@]}" | grep -Eo "$stability.*")"
+  major_version=${3:-'[0-9]+'}
   pecl_rest='https://pecl.php.net/rest/r/'
   response=$(get -s -n "" "$pecl_rest$extension"/allreleases.xml)
-  pecl_version=$(echo "$response" | grep -m 1 -Eio "([0-9]+\.[0-9]+\.[0-9]+${stability}[0-9]+)")
-  if [ ! "$pecl_version" ]; then
-    pecl_version=$(echo "$response" | grep -m 1 -Eo "([0-9]+\.[0-9]+\.[0-9]+)")
-  fi
+  for state in "${states[@]}"; do
+    pecl_version=$(echo "$response" | grep -m 1 -Eio "($major_version\.[0-9]+\.[0-9]+${state}[0-9]+<)" | cut -d '<' -f 1)
+    [ -z "$pecl_version" ] && pecl_version=$(echo "$response" | grep -m 1 -Eio "v>(.*)<\/v>.*$state<" | grep -m 1 -Eo "($major_version\.[0-9]+\.[0-9]+.*)<" | cut -d '<' -f 1)
+    [ -n "$pecl_version" ] && break;
+  done
+  [ -z "$pecl_version" ] && pecl_version=$(echo "$response" | grep -m 1 -Eo "($major_version\.[0-9]+\.[0-9]+)<" | cut -d '<' -f 1)
   echo "$pecl_version"
 }
 
@@ -162,7 +169,11 @@ pecl_install() {
   suffix_opts="$(parse_args "$extension" CONFIGURE_OPTS) $(parse_args "$extension" CONFIGURE_SUFFIX_OPTS)"
   IFS=' ' read -r -a libraries <<<"$(parse_args "$extension" LIBS) $(parse_args "$extension" "$(uname -s)"_LIBS)"
   (( ${#libraries[@]} )) && add_libs "${libraries[@]}" >/dev/null 2>&1
-  yes '' 2>/dev/null | sudo "$prefix_opts" pecl install -f -D "$(parse_pecl_configure_options "$suffix_opts")" "$extension" >/dev/null 2>&1
+  if [ "$version" = "5.3" ]; then
+    yes '' 2>/dev/null | sudo "$prefix_opts" pecl install -f "$extension" >/dev/null 2>&1
+  else
+    yes '' 2>/dev/null | sudo "$prefix_opts" pecl install -f -D "$(parse_pecl_configure_options "$suffix_opts")" "$extension" >/dev/null 2>&1
+  fi
 }
 
 # Function to install a specific version of PECL extension.
@@ -179,8 +190,11 @@ add_pecl_extension() {
     add_log "${tick:?}" "$extension" "Enabled"
   else
     disable_extension_helper "$extension" >/dev/null 2>&1
-    pecl_install "$extension-$pecl_version"
-    add_extension_log "$extension-$pecl_version" "Installed and enabled"
+    [ -n "$pecl_version" ] && pecl_version="-$pecl_version"
+    pecl_install "$extension$pecl_version" || add_extension "$extension" "$(get_extension_prefix "$extension")" >/dev/null 2>&1
+    extension_version="$(php -r "echo phpversion('$extension');")"
+    [ -n "$extension_version" ] && extension_version="-$extension_version"
+    add_extension_log "$extension$extension_version" "Installed and enabled"
   fi
 }
 
@@ -191,4 +205,9 @@ add_unstable_extension() {
   local prefix=$3
   pecl_version=$(get_pecl_version "$extension" "$stability")
   add_pecl_extension "$extension" "$pecl_version" "$prefix"
+}
+
+# Function to get extension prefix
+get_extension_prefix() {
+  echo "$1" | grep -Eq "xdebug([2-3])?$|opcache|ioncube|eaccelerator" && echo zend_extension || echo extension
 }

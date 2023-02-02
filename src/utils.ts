@@ -44,8 +44,8 @@ export async function getInput(
   }
 }
 
-/** Function to get manifest URL
- *
+/**
+ * Function to get manifest URL
  */
 export async function getManifestURL(): Promise<string> {
   return 'https://raw.githubusercontent.com/shivammathur/setup-php/develop/src/configs/php-versions.json';
@@ -246,7 +246,8 @@ export async function CSVArray(values_csv: string): Promise<Array<string>> {
           return value
             .trim()
             .replace(/^["']|["']$|(?<==)["']/g, '')
-            .replace(/=(((?!E_).)*[?{}|&~![()^]+((?!E_).)+)/, "='$1'");
+            .replace(/=(((?!E_).)*[?{}|&~![()^]+((?!E_).)+)/, "='$1'")
+            .replace(/=(.*?)(=.*)/, "='$1$2'");
         })
         .filter(Boolean);
   }
@@ -319,7 +320,14 @@ export async function getCommand(os: string, suffix: string): Promise<string> {
     case 'darwin':
       return 'add_' + suffix + ' ';
     case 'win32':
-      return 'Add-' + suffix.charAt(0).toUpperCase() + suffix.slice(1) + ' ';
+      return (
+        'Add-' +
+        suffix
+          .split('_')
+          .map((part: string) => part.charAt(0).toUpperCase() + part.slice(1))
+          .join('') +
+        ' '
+      );
     default:
       return await log('Platform ' + os + ' is not supported', os, 'error');
   }
@@ -412,4 +420,27 @@ export async function parseExtensionSource(
     ...matches.splice(1, matches.length),
     prefix
   );
+}
+
+/**
+ * Log to console
+ *
+ * @param variable
+ * @param command
+ * @param os
+ */
+export async function setVariable(
+  variable: string,
+  command: string,
+  os: string
+): Promise<string> {
+  switch (os) {
+    case 'win32':
+      return '\n$' + variable + ' = ' + command + '\n';
+
+    case 'linux':
+    case 'darwin':
+    default:
+      return '\n' + variable + '="$(' + command + ')"\n';
+  }
 }

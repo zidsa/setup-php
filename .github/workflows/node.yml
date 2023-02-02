@@ -16,6 +16,9 @@ on:
     paths-ignore:
       - '**.md'
       - 'examples/**'
+permissions:
+  contents: read
+
 jobs:
   run:
     name: Run
@@ -31,7 +34,7 @@ jobs:
           fetch-depth: 2
 
       - name: Setup Node.js 16.x
-        uses: actions/setup-node@v1
+        uses: actions/setup-node@v3
         with:
           node-version: 16.x
 
@@ -51,7 +54,7 @@ jobs:
         run: npm audit
 
       - name: Send Coverage
-        uses: codecov/codecov-action@v2
+        uses: codecov/codecov-action@v3
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: coverage/lcov.info
