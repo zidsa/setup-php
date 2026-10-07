@@ -1,25 +1,20 @@
 # Security Policy
 
-## Supported Versions
+## Security Maintainer
 
-The latest patch versions of `v1` and `v2` releases of this project are supported for security updates.
-
-## Supported PHP Versions
-
-This security policy only applies to the latest patches of the following PHP versions.
-
-| Version | Supported          |
-|---------|--------------------|
-| 7.4     | :white_check_mark: |
-| 8.0     | :white_check_mark: |
-| 8.1     | :white_check_mark: |
-| 8.2     | :white_check_mark: |
+[Yazan ALBaiz](https://github.com/yazan-albaiz) (@yazan-albaiz) is the security maintainer of this repository.
 
 ## Reporting a Vulnerability
 
-If you have found any issues that might have security implications in the versions supported, please send a report privately to [contact@shivammathur.com](mailto:contact@shivammathur.com).
-Do not report security reports publicly.
+Report vulnerabilities as GitHub issues in this repository:
+https://github.com/zidsa/setup-php/issues/new
 
-## Tidelift
+Include:
 
-If you use this GitHub Action through a Tidelift subscription, please refer to [https://tidelift.com/security](https://tidelift.com/security).
+- The affected version, tag or commit
+- Steps to reproduce
+- The expected impact
+
+Do not include secrets, credentials or customer data in the issue.
+
+The security maintainer triages each report and coordinates the fix and release.
